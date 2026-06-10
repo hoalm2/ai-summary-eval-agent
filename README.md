@@ -195,7 +195,7 @@ Rules:
 
 - `GET /health`: app liveness.
 - `GET /results`: safe JSON eval history, excluding full `report_text`.
-- `GET /dashboard`: HTML dashboard.
+- `GET /dashboard`: HTML dashboard with aggregate metrics, verdict/ticker/date filters, generated summaries, issue details, skeleton JSON, and judge JSON.
 - `POST /run-demo`: evaluates up to 2 first summaries; does not advance daily cursor.
 - `POST /run-daily`: picks next 5 unevaluated reports, generates summaries, judges them, and writes eval results.
 - `POST /run-one`: ad hoc evaluation; can optionally persist if `report_id` and `summary_id` are supplied.

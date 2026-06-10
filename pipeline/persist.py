@@ -153,6 +153,7 @@ class SupabaseStore:
         if not runs:
             return []
         report_ids = [run["report_id"] for run in runs if run.get("report_id")]
+        summary_ids = [run["summary_id"] for run in runs if run.get("summary_id")]
         reports = (
             self.client.table("reports")
             .select("id, ticker, report_date, source_pdf_url, status")
@@ -161,10 +162,25 @@ class SupabaseStore:
             .data
             or []
         )
+        summaries = (
+            self.client.table("summaries")
+            .select("id, summary_text, summary_model, created_at")
+            .in_("id", summary_ids)
+            .execute()
+            .data
+            or []
+        )
         report_by_id = {item["id"]: item for item in reports}
+        summary_by_id = {item["id"]: item for item in summaries}
         safe_runs: list[dict[str, Any]] = []
         for run in runs:
-            safe_runs.append({**run, "report": report_by_id.get(run.get("report_id"), {})})
+            safe_runs.append(
+                {
+                    **run,
+                    "report": report_by_id.get(run.get("report_id"), {}),
+                    "summary": summary_by_id.get(run.get("summary_id"), {}),
+                }
+            )
         return safe_runs
 
     def aggregate(self) -> dict[str, Any]:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import json
 from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException
@@ -294,18 +295,27 @@ def render_dashboard(aggregate: dict[str, Any], runs: list[dict[str, Any]]) -> s
     rows = []
     for run in runs:
         report = run.get("report") or {}
+        summary = run.get("summary") or {}
         issues = (run.get("blocks") or []) + (run.get("flags") or [])
         issue_text = "<br>".join(
             html.escape(f"{issue.get('category')}: {issue.get('summary_quote', '')} — {issue.get('explanation', '')}")
             for issue in issues
         ) or "No issues"
+        issues_detail = html.escape(json.dumps(issues, ensure_ascii=False, indent=2))
+        skeleton_detail = html.escape(json.dumps(run.get("skeleton_json") or {}, ensure_ascii=False, indent=2))
+        judge_detail = html.escape(json.dumps(run.get("judge_json") or {}, ensure_ascii=False, indent=2))
+        summary_text = html.escape(str(summary.get("summary_text", "")))
+        ticker = html.escape(str(report.get("ticker", "")))
+        report_date = html.escape(str(report.get("report_date", "")))
+        verdict = html.escape(str(run.get("verdict", "")))
         rows.append(
-            "<tr>"
+            f"<tr data-verdict='{verdict}' data-ticker='{ticker.lower()}' data-date='{report_date.lower()}'>"
             f"<td>{html.escape(str(run.get('created_at', '')))}</td>"
-            f"<td>{html.escape(str(report.get('ticker', '')))}</td>"
-            f"<td>{html.escape(str(report.get('report_date', '')))}</td>"
-            f"<td><span class='badge {html.escape(str(run.get('verdict', '')).lower())}'>{html.escape(str(run.get('verdict', '')))}</span></td>"
-            f"<td>{issue_text}</td>"
+            f"<td>{ticker}</td>"
+            f"<td>{report_date}</td>"
+            f"<td><span class='badge {verdict.lower()}'>{verdict}</span></td>"
+            f"<td><div class='summary'>{summary_text or '<em>No summary saved</em>'}</div></td>"
+            f"<td>{issue_text}<details><summary>Inspect JSON</summary><h4>Issues</h4><pre>{issues_detail}</pre><h4>Skeleton</h4><pre>{skeleton_detail}</pre><h4>Judge</h4><pre>{judge_detail}</pre></details></td>"
             "</tr>"
         )
     return f"""
@@ -320,6 +330,9 @@ def render_dashboard(aggregate: dict[str, Any], runs: list[dict[str, Any]]) -> s
     h1 {{ margin-bottom: 4px; }}
     .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin: 24px 0; }}
     .card {{ background: white; border: 1px solid #dfe8e5; border-radius: 16px; padding: 18px; box-shadow: 0 8px 24px rgba(22,49,47,.06); }}
+    .filters {{ display: flex; gap: 12px; flex-wrap: wrap; align-items: end; margin: 20px 0; }}
+    .filters label {{ display: grid; gap: 6px; font-weight: 700; }}
+    input, select {{ padding: 10px 12px; border: 1px solid #cddbd8; border-radius: 10px; min-width: 180px; }}
     .metric {{ font-size: 32px; font-weight: 750; }}
     table {{ width: 100%; border-collapse: collapse; background: white; border-radius: 16px; overflow: hidden; }}
     th, td {{ padding: 12px 14px; border-bottom: 1px solid #edf2f1; text-align: left; vertical-align: top; }}
@@ -330,6 +343,10 @@ def render_dashboard(aggregate: dict[str, Any], runs: list[dict[str, Any]]) -> s
     .fail {{ background: #ffe1df; color: #9d1c14; }}
     .pass-with-flag {{ background: #fff3cf; color: #7a5400; }}
     .error {{ background: #eceff3; color: #344054; }}
+    .summary {{ max-width: 420px; white-space: pre-wrap; }}
+    details {{ margin-top: 8px; }}
+    summary {{ cursor: pointer; color: #0b514b; font-weight: 700; }}
+    pre {{ white-space: pre-wrap; max-width: 720px; background: #f6f8f8; border: 1px solid #e4ecea; border-radius: 12px; padding: 12px; }}
   </style>
 </head>
 <body>
@@ -348,10 +365,47 @@ def render_dashboard(aggregate: dict[str, Any], runs: list[dict[str, Any]]) -> s
     <ul>{breakdown_items or "<li>No issues yet</li>"}</ul>
   </section>
   <h2>Latest eval runs</h2>
+  <section class="filters">
+    <label>Verdict
+      <select id="verdictFilter">
+        <option value="">All</option>
+        <option value="PASS">PASS</option>
+        <option value="FAIL">FAIL</option>
+        <option value="PASS-WITH-FLAG">PASS-WITH-FLAG</option>
+        <option value="ERROR">ERROR</option>
+      </select>
+    </label>
+    <label>Ticker
+      <input id="tickerFilter" placeholder="e.g. VTP">
+    </label>
+    <label>Report date
+      <input id="dateFilter" placeholder="e.g. 2026-06">
+    </label>
+  </section>
   <table>
-    <thead><tr><th>Time</th><th>Ticker</th><th>Report date</th><th>Verdict</th><th>Issues</th></tr></thead>
-    <tbody>{"".join(rows) or "<tr><td colspan='5'>No eval runs yet.</td></tr>"}</tbody>
+    <thead><tr><th>Time</th><th>Ticker</th><th>Report date</th><th>Verdict</th><th>Generated summary</th><th>Issues</th></tr></thead>
+    <tbody id="runsBody">{"".join(rows) or "<tr><td colspan='6'>No eval runs yet.</td></tr>"}</tbody>
   </table>
+  <script>
+    const verdictFilter = document.getElementById('verdictFilter');
+    const tickerFilter = document.getElementById('tickerFilter');
+    const dateFilter = document.getElementById('dateFilter');
+    const rows = Array.from(document.querySelectorAll('#runsBody tr[data-verdict]'));
+    function applyFilters() {{
+      const verdict = verdictFilter.value;
+      const ticker = tickerFilter.value.trim().toLowerCase();
+      const date = dateFilter.value.trim().toLowerCase();
+      for (const row of rows) {{
+        const okVerdict = !verdict || row.dataset.verdict === verdict;
+        const okTicker = !ticker || row.dataset.ticker.includes(ticker);
+        const okDate = !date || row.dataset.date.includes(date);
+        row.style.display = okVerdict && okTicker && okDate ? '' : 'none';
+      }}
+    }}
+    verdictFilter.addEventListener('change', applyFilters);
+    tickerFilter.addEventListener('input', applyFilters);
+    dateFilter.addEventListener('input', applyFilters);
+  </script>
 </body>
 </html>
 """
