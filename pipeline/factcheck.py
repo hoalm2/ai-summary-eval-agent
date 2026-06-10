@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 
 NUMBER_PATTERN = re.compile(
-    r"(?<!\w)(?:\d{1,3}(?:[.,]\d{3})+|\d+)(?:[.,]\d+)?\s*(?:%|đ|đồng|tỷ|triệu|nghìn|x)?",
+    r"(?<!\w)(?:\d{1,3}(?:[.,]\d{3})+|\d+)(?:[.,]\d+)?(?:(?:\s*(?:đồng|tỷ|triệu|nghìn)\b)|(?:\s*%)|(?:đ(?![A-Za-zÀ-ỹ]))|(?:\s*x\b))?",
     re.IGNORECASE,
 )
 DATE_PATTERN = re.compile(
@@ -87,4 +87,3 @@ def compute_verdict(blocks: list[dict], flags: list[dict], parse_error: bool = F
     if len(flags) == 1:
         return "PASS-WITH-FLAG"
     return "PASS"
-
