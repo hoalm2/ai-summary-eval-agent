@@ -23,6 +23,21 @@ This repo intentionally has **3 LLM stages in the product design**, but this MVP
 - Supabase Storage is only needed if original public PDF links become unstable.
 - Generated `data/`, local `storage/`, and `.env` files are ignored and should not be committed.
 
+## QC Strategy — Do Not Burn GreenNode Tokens Early
+
+The code is wired to GreenNode, but the default test phase should run with `MOCK_LLM_MODE=true`.
+
+1. **Day 1–4 / coding:** use Supabase + mock LLM flow only. Test prompt shape manually in chat by pasting report text and checking JSON format. Zero GreenNode tokens.
+2. **Day 5 / first deploy:** set `MOCK_LLM_MODE=false` and run exactly 1 symbol on GreenNode to verify end-to-end.
+3. **Day 6 / human eval:** PO reviews 5 verdicts and confirms judge quality.
+4. **Never run multi-symbol GreenNode loops** until prompts are validated manually first.
+
+Token-safe defaults:
+
+- `/run-demo` processes at most 2 records.
+- `/run-daily` processes 5 records, but during test phase it should run only with `MOCK_LLM_MODE=true`.
+- GreenNode is called only when `MOCK_LLM_MODE=false`.
+
 ## Supabase Setup
 
 1. Create a Supabase project.
@@ -56,6 +71,7 @@ Required variables:
 Optional:
 
 - `GREENNODE_JSON_MODE=true` after `scripts/spike_greennode.py` confirms support.
+- `MOCK_LLM_MODE=true` to run Supabase-backed flow without GreenNode calls.
 - `ALLOWED_PDF_HOSTS=cdn.simplize.vn` for PDF download allowlisting.
 
 ## Deploy Contract (Verified)
@@ -105,6 +121,8 @@ python scripts/spike_greennode.py
 
 Expected: two consecutive calls parse JSON, total latency is printed, and JSON-mode support is reported.
 
+Run this only when ready to spend a tiny amount of GreenNode tokens. It is intentionally not required for Day 1–4 mock testing.
+
 Supabase:
 
 ```bash
@@ -145,6 +163,8 @@ This inserts PASS, wrong-number, buy-price, tone-escalation, temporal-distortion
 - `POST /run-demo`: evaluates up to 2 first summaries; does not advance daily cursor.
 - `POST /run-daily`: evaluates next 5 summaries and advances `agent_state.last_daily_index`.
 - `POST /run-one`: ad hoc evaluation; can optionally persist if `report_id` and `summary_id` are supplied.
+
+During token-free testing, all protected trigger endpoints still exercise Supabase persistence and dashboard aggregation, but LLM outputs are mocked locally.
 
 ## Security + Ops
 
