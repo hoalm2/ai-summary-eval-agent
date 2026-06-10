@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+openai>=1
+pydantic>=2
+pymupdf
+python-dotenv
+jinja2
+httpx
+supabase
+
