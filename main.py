@@ -11,6 +11,7 @@ from config import get_settings
 from pipeline.pdf import extract_pdf_text, validate_pdf_source
 from pipeline.persist import SupabaseStore
 from pipeline.stage1_skeleton import extract_skeleton
+from pipeline.stage2_summary import generate_summary
 from pipeline.stage3_judge import judge_summary
 
 
@@ -27,21 +28,40 @@ class RunOneRequest(BaseModel):
     pdf_path_or_url: str | None = None
 
 
+class ReportImportItem(BaseModel):
+    ticker: str | None = None
+    report_date: str | None = None
+    source_pdf_url: str | None = None
+    pdf_storage_path: str | None = None
+    report_text: str | None = None
+    status: str = "ready"
+
+
+class ReportImportRequest(BaseModel):
+    reports: list[ReportImportItem]
+    skip_existing: bool = True
+
+
 def require_demo_token(x_demo_token: str | None) -> None:
     settings = get_settings()
     if not settings.demo_token or x_demo_token != settings.demo_token:
         raise HTTPException(status_code=401, detail="Missing or invalid X-Demo-Token")
 
 
-def evaluate_record(record: dict[str, Any], store: SupabaseStore | None = None) -> dict[str, Any]:
-    store = store or SupabaseStore()
-    report = record["report"]
-    summary = record["summary"]
+def ensure_report_text(report: dict[str, Any], store: SupabaseStore) -> str:
     report_text = report.get("report_text") or ""
     if not report_text and report.get("source_pdf_url"):
         validate_pdf_source(report["source_pdf_url"])
         report_text = extract_pdf_text(report["source_pdf_url"])
         store.update_report_text(report["id"], report_text)
+    return report_text
+
+
+def evaluate_record(record: dict[str, Any], store: SupabaseStore | None = None) -> dict[str, Any]:
+    store = store or SupabaseStore()
+    report = record["report"]
+    summary = record["summary"]
+    report_text = ensure_report_text(report, store)
     if not report_text:
         result = {
             "verdict": "ERROR",
@@ -71,6 +91,45 @@ def evaluate_record(record: dict[str, Any], store: SupabaseStore | None = None) 
         flags=result.get("flags", []),
     )
     return {"eval_run": saved, "result": result}
+
+
+def generate_and_evaluate_report(report: dict[str, Any], store: SupabaseStore | None = None) -> dict[str, Any]:
+    store = store or SupabaseStore()
+    report_text = ensure_report_text(report, store)
+    if not report_text:
+        summary = store.insert_summary(
+            {
+                "report_id": report["id"],
+                "summary_text": "",
+                "summary_model": "missing_report_text",
+            }
+        )
+        result = {
+            "verdict": "ERROR",
+            "blocks": [],
+            "flags": [],
+            "judge_json": {"verdict": "ERROR", "rationale": "Missing report_text and no usable source_pdf_url."},
+        }
+        saved = store.insert_eval_run(
+            report_id=report["id"],
+            summary_id=summary["id"],
+            skeleton_json={},
+            judge_json=result["judge_json"],
+            verdict="ERROR",
+            blocks=[],
+            flags=[],
+        )
+        return {"summary": summary, "eval_run": saved, "result": result}
+
+    summary_text = generate_summary(report_text, ticker=report.get("ticker"))
+    summary = store.insert_summary(
+        {
+            "report_id": report["id"],
+            "summary_text": summary_text,
+            "summary_model": get_settings().model_summary if not get_settings().mock_llm_mode else "mock_llm",
+        }
+    )
+    return evaluate_record({"report": report, "summary": summary}, store)
 
 
 @app.get("/health")
@@ -122,14 +181,46 @@ def run_daily(x_demo_token: str | None = Header(default=None)) -> dict[str, Any]
     require_demo_token(x_demo_token)
     settings = get_settings()
     store = SupabaseStore()
-    offset = int(store.get_state("last_daily_index", 0) or 0)
-    records = store.fetch_summaries(offset=offset, limit=settings.daily_batch_size)
-    if not records:
-        return {"processed": 0, "message": "fixture exhausted", "next_offset": offset}
-    outputs = [evaluate_record(record, store) for record in records]
-    next_offset = offset + len(records)
-    store.set_state("last_daily_index", next_offset)
-    return {"processed": len(outputs), "next_offset": next_offset, "outputs": outputs}
+    reports = store.fetch_unevaluated_reports(limit=settings.daily_batch_size)
+    if not reports:
+        return {"processed": 0, "message": "no unevaluated reports"}
+    outputs = [generate_and_evaluate_report(report, store) for report in reports]
+    store.set_state("last_daily_run", {"processed": len(outputs), "mode": "mock" if settings.mock_llm_mode else "greennode"})
+    return {"processed": len(outputs), "outputs": outputs}
+
+
+@app.post("/reports/import")
+def import_reports(payload: ReportImportRequest, x_demo_token: str | None = Header(default=None)) -> dict[str, Any]:
+    require_demo_token(x_demo_token)
+    store = SupabaseStore()
+    inserted: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    for item in payload.reports:
+        if item.source_pdf_url:
+            validate_pdf_source(item.source_pdf_url)
+        if not item.report_text and not item.source_pdf_url:
+            raise HTTPException(status_code=400, detail="Each report needs report_text or source_pdf_url")
+        existing = store.find_existing_report(
+            ticker=item.ticker,
+            report_date=item.report_date,
+            source_pdf_url=item.source_pdf_url,
+        )
+        if existing and payload.skip_existing:
+            skipped.append(existing)
+            continue
+        inserted.append(
+            store.insert_report(
+                {
+                    "ticker": item.ticker,
+                    "report_date": item.report_date,
+                    "source_pdf_url": item.source_pdf_url,
+                    "pdf_storage_path": item.pdf_storage_path,
+                    "report_text": item.report_text,
+                    "status": item.status,
+                }
+            )
+        )
+    return {"inserted": len(inserted), "skipped": len(skipped), "reports": inserted, "skipped_reports": skipped}
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
@@ -209,4 +300,3 @@ def render_dashboard(aggregate: dict[str, Any], runs: list[dict[str, Any]]) -> s
 </body>
 </html>
 """
-

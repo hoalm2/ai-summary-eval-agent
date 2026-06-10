@@ -54,6 +54,24 @@ class SupabaseStore:
         )
         return self._attach_reports(summaries)
 
+    def fetch_unevaluated_reports(self, *, limit: int = 5) -> list[dict[str, Any]]:
+        eval_runs = self.client.table("eval_runs").select("report_id").execute().data or []
+        evaluated_report_ids = {item["report_id"] for item in eval_runs if item.get("report_id")}
+        reports = (
+            self.client.table("reports")
+            .select("id, ticker, report_date, source_pdf_url, pdf_storage_path, report_text, status, created_at")
+            .order("created_at")
+            .limit(200)
+            .execute()
+            .data
+            or []
+        )
+        return [
+            report
+            for report in reports
+            if report.get("id") not in evaluated_report_ids and (report.get("report_text") or report.get("source_pdf_url"))
+        ][:limit]
+
     def _attach_reports(self, summaries: list[dict[str, Any]]) -> list[dict[str, Any]]:
         report_ids = [item["report_id"] for item in summaries if item.get("report_id")]
         if not report_ids:
@@ -77,6 +95,16 @@ class SupabaseStore:
 
     def update_report_text(self, report_id: str, report_text: str) -> None:
         self.client.table("reports").update({"report_text": report_text, "status": "ready"}).eq("id", report_id).execute()
+
+    def find_existing_report(self, *, ticker: str | None, report_date: str | None, source_pdf_url: str | None) -> dict[str, Any] | None:
+        query = self.client.table("reports").select("id, ticker, report_date, source_pdf_url, status")
+        if source_pdf_url:
+            response = query.eq("source_pdf_url", source_pdf_url).limit(1).execute()
+            return response.data[0] if response.data else None
+        if ticker and report_date:
+            response = query.eq("ticker", ticker).eq("report_date", report_date).limit(1).execute()
+            return response.data[0] if response.data else None
+        return None
 
     def insert_report(self, payload: dict[str, Any]) -> dict[str, Any]:
         response = self.client.table("reports").insert(payload).execute()
@@ -165,4 +193,3 @@ class SupabaseStore:
             "buy_violation_count": buy_violation_count,
             "failure_breakdown": failure_breakdown,
         }
-
