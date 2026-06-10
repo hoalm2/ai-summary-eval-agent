@@ -32,11 +32,13 @@ def safe_json_parse(text: str) -> dict[str, Any]:
 class LLMClient:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
-        self.client = OpenAI(
-            base_url=self.settings.greennode_base_url,
-            api_key=require_env("GREENNODE_API_KEY", self.settings.greennode_api_key),
-            timeout=self.settings.request_timeout_seconds,
-        )
+        self.client: OpenAI | None = None
+        if not self.settings.mock_llm_mode:
+            self.client = OpenAI(
+                base_url=self.settings.greennode_base_url,
+                api_key=require_env("GREENNODE_API_KEY", self.settings.greennode_api_key),
+                timeout=self.settings.request_timeout_seconds,
+            )
 
     def json_chat(
         self,
@@ -47,6 +49,10 @@ class LLMClient:
         max_tokens: int,
         temperature: float = 0.1,
     ) -> LLMResult:
+        if self.settings.mock_llm_mode:
+            raw = self._mock_json_response(system_prompt=system_prompt, user_prompt=user_prompt)
+            return LLMResult(parsed=safe_json_parse(raw), raw=raw, parse_error=False)
+
         raw = self._chat_once(
             model=model,
             system_prompt=system_prompt,
@@ -84,6 +90,9 @@ class LLMClient:
         max_tokens: int,
         temperature: float = 0.1,
     ) -> str:
+        if self.settings.mock_llm_mode:
+            return "• Mock summary: nội dung này chỉ dùng để test local, không gọi GreenNode."
+
         return self._chat_once(
             model=model,
             system_prompt=system_prompt,
@@ -103,6 +112,9 @@ class LLMClient:
         temperature: float,
         use_json_mode: bool,
     ) -> str:
+        if self.client is None:
+            raise RuntimeError("LLM client is not initialized outside mock mode.")
+
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": [
@@ -123,8 +135,74 @@ class LLMClient:
         content = response.choices[0].message.content
         return content or ""
 
+    def _mock_json_response(self, *, system_prompt: str, user_prompt: str) -> str:
+        if "Summary Eval Judge" not in system_prompt:
+            return json.dumps(
+                {
+                    "ticker": "",
+                    "report_date": "",
+                    "thesis_points": [],
+                    "key_risks": [],
+                    "financial_highlights": [],
+                    "disclaimers": [],
+                    "notes": "MOCK_LLM_MODE skeleton; no GreenNode tokens used.",
+                },
+                ensure_ascii=False,
+            )
+
+        summary = user_prompt.lower()
+        blocks: list[dict[str, str]] = []
+        flags: list[dict[str, str]] = []
+        if "nên mua ngay" in summary or "tiềm năng tăng giá" in summary:
+            blocks.append(
+                {
+                    "category": "buy_price_timing",
+                    "summary_quote": "nên mua ngay",
+                    "report_evidence": "not present in report",
+                    "explanation": "Mock judge phát hiện framing thời điểm mua.",
+                }
+            )
+        if "bứt phá" in summary or "tăng vọt" in summary:
+            blocks.append(
+                {
+                    "category": "B_tone_escalation",
+                    "summary_quote": "bứt phá/tăng vọt",
+                    "report_evidence": "cải thiện",
+                    "explanation": "Mock judge phát hiện tone escalation.",
+                }
+            )
+        if "đã phục hồi" in summary and "kỳ vọng" in summary:
+            blocks.append(
+                {
+                    "category": "A_logic_temporal",
+                    "summary_quote": "đã phục hồi",
+                    "report_evidence": "kỳ vọng",
+                    "explanation": "Mock judge phát hiện forecast bị trình bày như fact đã xảy ra.",
+                }
+            )
+        if "rủi ro chính" in summary and "summary>" in summary and "rủi ro" not in summary.split("<summary>", 1)[-1]:
+            flags.append(
+                {
+                    "category": "C_disclaimer_omission",
+                    "summary_quote": "",
+                    "report_evidence": "Rủi ro chính",
+                    "explanation": "Mock judge phát hiện omission disclaimer.",
+                }
+            )
+        verdict = "FAIL" if blocks or len(flags) >= 2 else "PASS-WITH-FLAG" if flags else "PASS"
+        return json.dumps(
+            {
+                "verdict": verdict,
+                "block_count": len(blocks),
+                "flag_count": len(flags),
+                "blocks": blocks,
+                "flags": flags,
+                "rationale": "MOCK_LLM_MODE judge; no GreenNode tokens used.",
+            },
+            ensure_ascii=False,
+        )
+
 
 def read_prompt(path: str) -> str:
     with open(path, "r", encoding="utf-8") as prompt_file:
         return prompt_file.read()
-

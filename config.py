@@ -26,6 +26,7 @@ class Settings:
     greennode_api_key: str
     greennode_base_url: str
     greennode_json_mode: bool
+    mock_llm_mode: bool
     model_skeleton: str
     model_summary: str
     model_judge: str
@@ -49,6 +50,7 @@ def get_settings() -> Settings:
         greennode_api_key=os.getenv("GREENNODE_API_KEY", ""),
         greennode_base_url=os.getenv("GREENNODE_BASE_URL", "https://api.greennode.ai/v1"),
         greennode_json_mode=_bool_env("GREENNODE_JSON_MODE", True),
+        mock_llm_mode=_bool_env("MOCK_LLM_MODE", False),
         model_skeleton=os.getenv("MODEL_SKELETON", "qwen3-5-27b"),
         model_summary=os.getenv("MODEL_SUMMARY", "qwen3-5-27b"),
         model_judge=os.getenv("MODEL_JUDGE", "gemma-4-31b-it"),
@@ -65,4 +67,3 @@ def require_env(name: str, value: str) -> str:
     if not value:
         raise RuntimeError(f"Missing required environment variable: {name}")
     return value
-
