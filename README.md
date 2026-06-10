@@ -77,6 +77,7 @@ Optional:
 - `GREENNODE_JSON_MODE=true` after `scripts/spike_greennode.py` confirms support.
 - `MOCK_LLM_MODE=true` to run Supabase-backed flow without GreenNode calls.
 - `ALLOWED_PDF_HOSTS=cdn.simplize.vn` for PDF download allowlisting.
+- `REPORT_TEXT_MIN_CHARS=80` rejects empty/too-short report text before judging.
 
 ## Deploy Contract (Verified)
 
@@ -184,6 +185,9 @@ curl -X POST "$AGENT_URL/reports/import" \
 Rules:
 
 - Each item needs either `report_text` or an allowlisted `source_pdf_url`.
+- `report_text` is the operational ground truth used by the judge. Keep `source_pdf_url` as the source reference.
+- If only `source_pdf_url` is provided, `/run-daily` extracts text with PyMuPDF and stores it back into `reports.report_text`.
+- Reports with empty or too-short extracted text become controlled `ERROR` evals instead of being judged.
 - `skip_existing=true` skips reports with the same `source_pdf_url`, or same `ticker + report_date` when no URL is provided.
 - This endpoint only inserts reports. Summaries are created later by `/run-daily`.
 
@@ -204,6 +208,8 @@ During token-free testing, all protected trigger endpoints still exercise Supaba
 - `.env` is ignored and not copied explicitly into Docker.
 - `DEMO_TOKEN` protects API-burning endpoints.
 - PDF fetches are restricted to `ALLOWED_PDF_HOSTS` or local files under `data/`.
+- Ground-truth text is extracted with PyMuPDF, not an LLM. Skeleton is only a hint; Stage 3 judges against full `report_text`.
+- Too-short PDF extraction is marked with `extract_too_short` / `report_text_too_short` and persisted as `ERROR`.
 - Dashboard hides full report text.
 - Token caps: skeleton `1800`, summary `900`, judge `1800` max tokens by default.
 - Expected latency depends on GreenNode model speed; budget roughly 2 LLM calls per daily eval item.

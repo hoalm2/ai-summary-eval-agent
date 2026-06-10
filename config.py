@@ -42,6 +42,7 @@ class Settings:
     judge_max_tokens: int = 1800
     daily_batch_size: int = 5
     demo_batch_size: int = 2
+    report_text_min_chars: int = 80
 
 
 @lru_cache(maxsize=1)
@@ -60,6 +61,7 @@ def get_settings() -> Settings:
         demo_token=os.getenv("DEMO_TOKEN", ""),
         port=int(os.getenv("PORT", "8080")),
         allowed_pdf_hosts=_csv_env("ALLOWED_PDF_HOSTS", "cdn.simplize.vn"),
+        report_text_min_chars=int(os.getenv("REPORT_TEXT_MIN_CHARS", "80")),
     )
 
 

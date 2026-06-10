@@ -96,6 +96,9 @@ class SupabaseStore:
     def update_report_text(self, report_id: str, report_text: str) -> None:
         self.client.table("reports").update({"report_text": report_text, "status": "ready"}).eq("id", report_id).execute()
 
+    def update_report_status(self, report_id: str, status: str) -> None:
+        self.client.table("reports").update({"status": status}).eq("id", report_id).execute()
+
     def find_existing_report(self, *, ticker: str | None, report_date: str | None, source_pdf_url: str | None) -> dict[str, Any] | None:
         query = self.client.table("reports").select("id, ticker, report_date, source_pdf_url, status")
         if source_pdf_url:

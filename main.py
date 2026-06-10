@@ -18,6 +18,13 @@ from pipeline.stage3_judge import judge_summary
 app = FastAPI(title="AI Summary Eval Agent", version="0.1.0")
 
 
+class ReportTextError(Exception):
+    def __init__(self, reason: str, status: str = "extract_failed") -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.status = status
+
+
 class RunOneRequest(BaseModel):
     report_id: str | None = None
     summary_id: str | None = None
@@ -49,19 +56,78 @@ def require_demo_token(x_demo_token: str | None) -> None:
 
 
 def ensure_report_text(report: dict[str, Any], store: SupabaseStore) -> str:
+    settings = get_settings()
     report_text = report.get("report_text") or ""
     if not report_text and report.get("source_pdf_url"):
-        validate_pdf_source(report["source_pdf_url"])
-        report_text = extract_pdf_text(report["source_pdf_url"])
+        try:
+            validate_pdf_source(report["source_pdf_url"])
+            report_text = extract_pdf_text(report["source_pdf_url"])
+        except Exception as exc:
+            store.update_report_status(report["id"], "extract_failed")
+            raise ReportTextError(f"PDF extraction failed: {exc}") from exc
         store.update_report_text(report["id"], report_text)
+    if len(report_text.strip()) < settings.report_text_min_chars:
+        status = "extract_too_short" if report.get("source_pdf_url") else "report_text_too_short"
+        store.update_report_status(report["id"], status)
+        raise ReportTextError(
+            f"Report text too short for reliable evaluation: {len(report_text.strip())} chars",
+            status=status,
+        )
     return report_text
+
+
+def persist_error_eval(
+    *,
+    store: SupabaseStore,
+    report: dict[str, Any],
+    summary_text: str,
+    summary_model: str,
+    reason: str,
+) -> dict[str, Any]:
+    summary = store.insert_summary(
+        {
+            "report_id": report["id"],
+            "summary_text": summary_text,
+            "summary_model": summary_model,
+        }
+    )
+    judge_json = {"verdict": "ERROR", "rationale": reason}
+    saved = store.insert_eval_run(
+        report_id=report["id"],
+        summary_id=summary["id"],
+        skeleton_json={},
+        judge_json=judge_json,
+        verdict="ERROR",
+        blocks=[],
+        flags=[],
+    )
+    return {
+        "summary": summary,
+        "eval_run": saved,
+        "result": {"verdict": "ERROR", "blocks": [], "flags": [], "judge_json": judge_json},
+    }
 
 
 def evaluate_record(record: dict[str, Any], store: SupabaseStore | None = None) -> dict[str, Any]:
     store = store or SupabaseStore()
     report = record["report"]
     summary = record["summary"]
-    report_text = ensure_report_text(report, store)
+    try:
+        report_text = ensure_report_text(report, store)
+    except ReportTextError as exc:
+        saved = store.insert_eval_run(
+            report_id=report["id"],
+            summary_id=summary["id"],
+            skeleton_json={},
+            judge_json={"verdict": "ERROR", "rationale": exc.reason},
+            verdict="ERROR",
+            blocks=[],
+            flags=[],
+        )
+        return {
+            "eval_run": saved,
+            "result": {"verdict": "ERROR", "blocks": [], "flags": [], "judge_json": {"verdict": "ERROR", "rationale": exc.reason}},
+        }
     if not report_text:
         result = {
             "verdict": "ERROR",
@@ -95,31 +161,16 @@ def evaluate_record(record: dict[str, Any], store: SupabaseStore | None = None) 
 
 def generate_and_evaluate_report(report: dict[str, Any], store: SupabaseStore | None = None) -> dict[str, Any]:
     store = store or SupabaseStore()
-    report_text = ensure_report_text(report, store)
-    if not report_text:
-        summary = store.insert_summary(
-            {
-                "report_id": report["id"],
-                "summary_text": "",
-                "summary_model": "missing_report_text",
-            }
+    try:
+        report_text = ensure_report_text(report, store)
+    except ReportTextError as exc:
+        return persist_error_eval(
+            store=store,
+            report=report,
+            summary_text="",
+            summary_model=exc.status,
+            reason=exc.reason,
         )
-        result = {
-            "verdict": "ERROR",
-            "blocks": [],
-            "flags": [],
-            "judge_json": {"verdict": "ERROR", "rationale": "Missing report_text and no usable source_pdf_url."},
-        }
-        saved = store.insert_eval_run(
-            report_id=report["id"],
-            summary_id=summary["id"],
-            skeleton_json={},
-            judge_json=result["judge_json"],
-            verdict="ERROR",
-            blocks=[],
-            flags=[],
-        )
-        return {"summary": summary, "eval_run": saved, "result": result}
 
     summary_text = generate_summary(report_text, ticker=report.get("ticker"))
     summary = store.insert_summary(
@@ -152,6 +203,8 @@ def run_one(payload: RunOneRequest, x_demo_token: str | None = Header(default=No
         report_text = extract_pdf_text(payload.pdf_path_or_url)
     if not report_text:
         raise HTTPException(status_code=400, detail="report_text or allowed pdf_path_or_url is required")
+    if len(report_text.strip()) < get_settings().report_text_min_chars:
+        raise HTTPException(status_code=400, detail="report_text is too short for reliable evaluation")
     skeleton = extract_skeleton(report_text, ticker=payload.ticker, report_date=payload.report_date)
     result = judge_summary(report_text=report_text, summary_text=payload.summary_text, skeleton_json=skeleton)
     if payload.report_id and payload.summary_id:
@@ -200,6 +253,8 @@ def import_reports(payload: ReportImportRequest, x_demo_token: str | None = Head
             validate_pdf_source(item.source_pdf_url)
         if not item.report_text and not item.source_pdf_url:
             raise HTTPException(status_code=400, detail="Each report needs report_text or source_pdf_url")
+        if item.report_text and len(item.report_text.strip()) < get_settings().report_text_min_chars:
+            raise HTTPException(status_code=400, detail="report_text is too short for reliable evaluation")
         existing = store.find_existing_report(
             ticker=item.ticker,
             report_date=item.report_date,
@@ -216,7 +271,7 @@ def import_reports(payload: ReportImportRequest, x_demo_token: str | None = Head
                     "source_pdf_url": item.source_pdf_url,
                     "pdf_storage_path": item.pdf_storage_path,
                     "report_text": item.report_text,
-                    "status": item.status,
+                    "status": item.status if item.report_text else "pending",
                 }
             )
         )
