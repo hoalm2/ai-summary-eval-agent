@@ -296,11 +296,35 @@ def run_demo(x_demo_token: str | None = Header(default=None)) -> dict[str, Any]:
     return {"processed": len(outputs), "outputs": outputs}
 
 
+@app.get("/pipeline/status")
+def pipeline_status() -> dict[str, Any]:
+    store = SupabaseStore()
+    enabled = store.get_state("pipeline_enabled", True)
+    last_run = store.get_state("last_daily_run")
+    return {"pipeline_enabled": enabled is not False, "last_daily_run": last_run}
+
+
+@app.post("/pipeline/enable")
+def pipeline_enable(x_demo_token: str | None = Header(default=None)) -> dict[str, Any]:
+    require_demo_token(x_demo_token)
+    SupabaseStore().set_state("pipeline_enabled", True)
+    return {"pipeline_enabled": True}
+
+
+@app.post("/pipeline/disable")
+def pipeline_disable(x_demo_token: str | None = Header(default=None)) -> dict[str, Any]:
+    require_demo_token(x_demo_token)
+    SupabaseStore().set_state("pipeline_enabled", False)
+    return {"pipeline_enabled": False}
+
+
 @app.post("/run-daily")
 def run_daily(x_demo_token: str | None = Header(default=None)) -> dict[str, Any]:
     require_demo_token(x_demo_token)
     settings = get_settings()
     store = SupabaseStore()
+    if store.get_state("pipeline_enabled", True) is False:
+        return {"processed": 0, "status": "disabled", "message": "pipeline is disabled — POST /pipeline/enable to re-enable"}
     reports = store.fetch_unevaluated_reports(limit=settings.daily_batch_size)
     if not reports:
         return {"processed": 0, "message": "no unevaluated reports"}
