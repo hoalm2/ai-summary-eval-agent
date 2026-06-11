@@ -67,7 +67,7 @@ cp .env.example .env
 Required variables:
 
 - `GREENNODE_API_KEY`
-- `GREENNODE_BASE_URL`
+- `GREENNODE_BASE_URL` — default `https://maas-llm-aiplatform-hcm.api.vngcloud.vn/v1`
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `DEMO_TOKEN`
@@ -225,6 +225,8 @@ uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}
 ```
 
 Inject secrets at runtime via AgentBase env. Do not bake `.env` into the image.
+
+Official AgentBase skills are installed project-locally under `.agents/skills/`. Restart Codex/your AI coding tool if the skills do not appear. The official guide expects AgentBase deployment to use IAM env vars `GREENNODE_CLIENT_ID` and `GREENNODE_CLIENT_SECRET` for platform operations, while this app uses `GREENNODE_API_KEY` / `GREENNODE_BASE_URL` for OpenAI-compatible MaaS calls.
 
 Cloud smoke test after deploy:
 

@@ -14,3 +14,7 @@ __pycache__/
 .venv/
 venv/
 
+.agentbase/
+.agentbase-state.json
+.greennode.json
+*registry*credentials*.json

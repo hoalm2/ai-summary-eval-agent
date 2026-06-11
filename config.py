@@ -49,7 +49,7 @@ class Settings:
 def get_settings() -> Settings:
     return Settings(
         greennode_api_key=os.getenv("GREENNODE_API_KEY", ""),
-        greennode_base_url=os.getenv("GREENNODE_BASE_URL", "https://api.greennode.ai/v1"),
+        greennode_base_url=os.getenv("GREENNODE_BASE_URL", "https://maas-llm-aiplatform-hcm.api.vngcloud.vn/v1"),
         greennode_json_mode=_bool_env("GREENNODE_JSON_MODE", True),
         mock_llm_mode=_bool_env("MOCK_LLM_MODE", False),
         model_skeleton=os.getenv("MODEL_SKELETON", "qwen3-5-27b"),
