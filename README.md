@@ -103,6 +103,7 @@ uvicorn main:app --reload --port 8080
 Open:
 
 - `GET http://localhost:8080/health`
+- `GET http://localhost:8080/status`
 - `GET http://localhost:8080/dashboard`
 - `GET http://localhost:8080/results`
 
@@ -194,6 +195,7 @@ Rules:
 ## API
 
 - `GET /health`: app liveness.
+- `GET /status`: deployment smoke test without exposing secrets; shows mock mode, Supabase connectivity, and row counts.
 - `GET /results`: safe JSON eval history, excluding full `report_text`.
 - `GET /dashboard`: HTML dashboard with aggregate metrics, verdict/ticker/date filters, generated summaries, issue details, skeleton JSON, and judge JSON.
 - `POST /run-demo`: evaluates up to 2 first summaries; does not advance daily cursor.
@@ -223,3 +225,13 @@ uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}
 ```
 
 Inject secrets at runtime via AgentBase env. Do not bake `.env` into the image.
+
+Cloud smoke test after deploy:
+
+```bash
+curl "$AGENT_URL/health"
+curl "$AGENT_URL/status"
+curl "$AGENT_URL/dashboard"
+```
+
+For the first cloud test, keep `MOCK_LLM_MODE=true`. Only set `MOCK_LLM_MODE=false` when manually validating exactly one GreenNode-backed report.

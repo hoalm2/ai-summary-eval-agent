@@ -189,6 +189,38 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/status")
+def status() -> dict[str, Any]:
+    settings = get_settings()
+    response: dict[str, Any] = {
+        "status": "ok",
+        "mock_llm_mode": settings.mock_llm_mode,
+        "greennode_configured": bool(settings.greennode_api_key),
+        "supabase_configured": bool(settings.supabase_url and settings.supabase_service_role_key),
+        "daily_batch_size": settings.daily_batch_size,
+        "demo_batch_size": settings.demo_batch_size,
+        "report_text_min_chars": settings.report_text_min_chars,
+    }
+    if not response["supabase_configured"]:
+        return {**response, "supabase_ok": False}
+    try:
+        store = SupabaseStore()
+        reports_count = store.client.table("reports").select("id", count="exact").limit(1).execute().count
+        summaries_count = store.client.table("summaries").select("id", count="exact").limit(1).execute().count
+        eval_runs_count = store.client.table("eval_runs").select("id", count="exact").limit(1).execute().count
+        response.update(
+            {
+                "supabase_ok": True,
+                "reports_count": reports_count,
+                "summaries_count": summaries_count,
+                "eval_runs_count": eval_runs_count,
+            }
+        )
+    except Exception as exc:
+        response.update({"supabase_ok": False, "supabase_error": str(exc)})
+    return response
+
+
 @app.get("/results")
 def results() -> list[dict[str, Any]]:
     return SupabaseStore().fetch_eval_runs()
