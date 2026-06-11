@@ -12,6 +12,7 @@ from config import get_settings
 from pipeline.pdf import extract_pdf_text, validate_pdf_source
 from pipeline.persist import SupabaseStore
 from pipeline.stage1_skeleton import extract_skeleton
+from pipeline.stage1b_align import align_bullets
 from pipeline.stage2_summary import generate_summary
 from pipeline.stage3_judge import judge_summary
 
@@ -101,6 +102,7 @@ def persist_error_eval(
         verdict="ERROR",
         blocks=[],
         flags=[],
+        bullet_evals=[],
     )
     return {
         "summary": summary,
@@ -124,6 +126,7 @@ def evaluate_record(record: dict[str, Any], store: SupabaseStore | None = None) 
             verdict="ERROR",
             blocks=[],
             flags=[],
+            bullet_evals=[],
         )
         return {
             "eval_run": saved,
@@ -136,17 +139,20 @@ def evaluate_record(record: dict[str, Any], store: SupabaseStore | None = None) 
             "flags": [],
             "judge_json": {"verdict": "ERROR", "rationale": "Missing report_text and no usable source_pdf_url."},
         }
-        skeleton = {}
+        skeleton: dict[str, Any] = {}
+        bullet_evals: list[dict[str, Any]] = []
     else:
         skeleton = extract_skeleton(
             report_text,
             ticker=report.get("ticker"),
             report_date=report.get("report_date"),
         )
+        bullet_evals = align_bullets(report_text, summary["summary_text"])
         result = judge_summary(
             report_text=report_text,
             summary_text=summary["summary_text"],
             skeleton_json=skeleton,
+            bullet_evals=bullet_evals,
         )
     saved = store.insert_eval_run(
         report_id=report["id"],
@@ -156,6 +162,7 @@ def evaluate_record(record: dict[str, Any], store: SupabaseStore | None = None) 
         verdict=result["verdict"],
         blocks=result.get("blocks", []),
         flags=result.get("flags", []),
+        bullet_evals=bullet_evals,
     )
     return {"eval_run": saved, "result": result}
 
@@ -264,7 +271,8 @@ def run_one(payload: RunOneRequest, x_demo_token: str | None = Header(default=No
     if len(report_text.strip()) < get_settings().report_text_min_chars:
         raise HTTPException(status_code=400, detail="report_text is too short for reliable evaluation")
     skeleton = extract_skeleton(report_text, ticker=payload.ticker, report_date=payload.report_date)
-    result = judge_summary(report_text=report_text, summary_text=payload.summary_text, skeleton_json=skeleton)
+    bullet_evals = align_bullets(report_text, payload.summary_text)
+    result = judge_summary(report_text=report_text, summary_text=payload.summary_text, skeleton_json=skeleton, bullet_evals=bullet_evals)
     if payload.report_id and payload.summary_id:
         SupabaseStore().insert_eval_run(
             report_id=payload.report_id,
@@ -274,6 +282,7 @@ def run_one(payload: RunOneRequest, x_demo_token: str | None = Header(default=No
             verdict=result["verdict"],
             blocks=result.get("blocks", []),
             flags=result.get("flags", []),
+            bullet_evals=bullet_evals,
         )
     return {"skeleton": skeleton, **result}
 
@@ -344,23 +353,181 @@ def dashboard() -> str:
     return render_dashboard(aggregate, runs)
 
 
+ISSUE_GROUP_LABELS = {
+    "A": "Type A — factual/logic hallucination",
+    "B": "Type B — unsupported/fabricated claim",
+    "BUY": "BUY — buy price violation",
+    "C": "Type C — disclaimer omission",
+    "FMT": "FMT — format inconsistency",
+    "RENDER": "RENDER — render quality",
+    "ERROR": "ERROR — operational issue",
+    "OTHER": "OTHER",
+}
+
+
+def issue_group(category: str) -> str:
+    if category.startswith("A_"):
+        return "A"
+    if category.startswith("B_"):
+        return "B"
+    if category.startswith("buy_price"):
+        return "BUY"
+    if category == "C_disclaimer_omission":
+        return "C"
+    if category == "format":
+        return "FMT"
+    if category == "render":
+        return "RENDER"
+    if category == "ERROR":
+        return "ERROR"
+    return "OTHER"
+
+
+def format_rate(value: Any) -> str:
+    try:
+        return f"{float(value) * 100:.0f}%"
+    except (TypeError, ValueError):
+        return "0%"
+
+
+def build_daily_trends(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    trends: dict[str, dict[str, Any]] = {}
+    for run in runs:
+        report = run.get("report") or {}
+        date_key = str(run.get("created_at") or report.get("report_date") or "unknown")[:10]
+        bucket = trends.setdefault(
+            date_key,
+            {
+                "date": date_key,
+                "total": 0,
+                "pass": 0,
+                "fail": 0,
+                "pass_with_flag": 0,
+                "error": 0,
+                "hallucination": 0,
+                "buy_violation": 0,
+            },
+        )
+        bucket["total"] += 1
+        verdict = run.get("verdict")
+        if verdict == "PASS":
+            bucket["pass"] += 1
+        elif verdict == "FAIL":
+            bucket["fail"] += 1
+        elif verdict == "PASS-WITH-FLAG":
+            bucket["pass_with_flag"] += 1
+        elif verdict == "ERROR":
+            bucket["error"] += 1
+        for issue in (run.get("blocks") or []) + (run.get("flags") or []):
+            category = str(issue.get("category", ""))
+            if category.startswith(("A_", "B_")):
+                bucket["hallucination"] += 1
+            if category.startswith("buy_price"):
+                bucket["buy_violation"] += 1
+    return [trends[key] for key in sorted(trends.keys(), reverse=True)]
+
+
+def render_bullet_breakdown(
+    bullet_evals: list[dict[str, Any]],
+    blocks: list[dict[str, Any]],
+    flags: list[dict[str, Any]],
+) -> str:
+    if not bullet_evals:
+        return ""
+    issues_by_bullet: dict[int, list[dict[str, Any]]] = {}
+    for issue in blocks + flags:
+        idx = issue.get("bullet_index")
+        if idx is not None:
+            issues_by_bullet.setdefault(int(idx), []).append(issue)
+    rows = []
+    for be in bullet_evals:
+        idx = be.get("bullet_index", "?")
+        bullet_text = html.escape(str(be.get("bullet_text", "")))
+        citations = "".join(
+            f"<blockquote style='margin:2px 0 4px 8px;padding:2px 8px;border-left:3px solid #cddbd8;font-size:11px;color:#555'>{html.escape(str(c))}</blockquote>"
+            for c in (be.get("report_citations") or [])
+        ) or "<span style='color:#aaa;font-size:11px'>—</span>"
+        bullet_issues = issues_by_bullet.get(int(idx) if isinstance(idx, (int, float)) else -1, [])
+        issue_cells = "".join(
+            f"<div style='font-size:11px;margin-bottom:3px'>"
+            f"<span class='issue-group'>{html.escape(issue_group(str(issue.get('category',''))))}</span> "
+            f"<code>{html.escape(str(issue.get('category','')))}</code>: "
+            f"{html.escape(str(issue.get('explanation','')))}</div>"
+            for issue in bullet_issues
+        ) or "<span style='color:#aaa;font-size:11px'>—</span>"
+        rows.append(
+            f"<tr style='vertical-align:top;border-bottom:1px solid #edf2f1'>"
+            f"<td style='padding:5px 8px;font-weight:700;width:24px;color:#0b514b'>{idx}</td>"
+            f"<td style='padding:5px 8px;max-width:300px;font-size:12px'>{bullet_text}</td>"
+            f"<td style='padding:5px 8px;max-width:260px'>{citations}</td>"
+            f"<td style='padding:5px 8px;max-width:220px'>{issue_cells}</td>"
+            "</tr>"
+        )
+    n = len(bullet_evals)
+    return (
+        f"<details style='margin-top:6px'>"
+        f"<summary>Bullet breakdown ({n} bullets)</summary>"
+        f"<table style='width:100%;margin-top:6px;border-collapse:collapse;font-size:12px'>"
+        f"<thead><tr style='background:#f0f5f4'>"
+        f"<th style='padding:4px 8px;text-align:left'>#</th>"
+        f"<th style='padding:4px 8px;text-align:left'>Bullet</th>"
+        f"<th style='padding:4px 8px;text-align:left'>Report citations</th>"
+        f"<th style='padding:4px 8px;text-align:left'>Issues</th>"
+        f"</tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody>"
+        f"</table></details>"
+    )
+
+
 def render_dashboard(aggregate: dict[str, Any], runs: list[dict[str, Any]]) -> str:
+    group_counts: dict[str, int] = {}
+    for category, count in aggregate.get("failure_breakdown", {}).items():
+        group = issue_group(str(category))
+        group_counts[group] = group_counts.get(group, 0) + int(count)
+    group_items = "".join(
+        f"<li><strong>{html.escape(ISSUE_GROUP_LABELS.get(group, group))}</strong>: {count}</li>"
+        for group, count in sorted(group_counts.items())
+    )
     breakdown_items = "".join(
-        f"<li><code>{html.escape(category)}</code>: {count}</li>"
+        f"<li><span class='issue-group'>{html.escape(issue_group(str(category)))}</span> <code>{html.escape(category)}</code>: {count}</li>"
         for category, count in sorted(aggregate.get("failure_breakdown", {}).items())
     )
+    trend_rows = []
+    for trend in build_daily_trends(runs):
+        pass_rate = trend["pass"] / trend["total"] if trend["total"] else 0
+        hallucination_rate = trend["hallucination"] / trend["total"] if trend["total"] else 0
+        trend_rows.append(
+            "<tr>"
+            f"<td>{html.escape(str(trend['date']))}</td>"
+            f"<td>{trend['total']}</td>"
+            f"<td>{format_rate(pass_rate)}</td>"
+            f"<td>{trend['pass']}</td>"
+            f"<td>{trend['fail']}</td>"
+            f"<td>{trend['pass_with_flag']}</td>"
+            f"<td>{trend['error']}</td>"
+            f"<td>{trend['hallucination']} ({format_rate(hallucination_rate)})</td>"
+            f"<td>{trend['buy_violation']}</td>"
+            "</tr>"
+        )
     rows = []
     for run in runs:
         report = run.get("report") or {}
         summary = run.get("summary") or {}
         issues = (run.get("blocks") or []) + (run.get("flags") or [])
         issue_text = "<br>".join(
-            html.escape(f"{issue.get('category')}: {issue.get('summary_quote', '')} — {issue.get('explanation', '')}")
+            (
+                f"<span class='issue-group'>{html.escape(issue_group(str(issue.get('category', ''))))}</span> "
+                f"<code>{html.escape(str(issue.get('category', '')))}</code>: "
+                f"{html.escape(str(issue.get('summary_quote', '')))} — {html.escape(str(issue.get('explanation', '')))}"
+            )
             for issue in issues
         ) or "No issues"
         issues_detail = html.escape(json.dumps(issues, ensure_ascii=False, indent=2))
         skeleton_detail = html.escape(json.dumps(run.get("skeleton_json") or {}, ensure_ascii=False, indent=2))
         judge_detail = html.escape(json.dumps(run.get("judge_json") or {}, ensure_ascii=False, indent=2))
+        bullet_evals_data = run.get("bullet_evals") or []
+        bullet_evals_detail = html.escape(json.dumps(bullet_evals_data, ensure_ascii=False, indent=2))
+        bullet_breakdown_html = render_bullet_breakdown(bullet_evals_data, run.get("blocks") or [], run.get("flags") or [])
         summary_text = html.escape(str(summary.get("summary_text", "")))
         ticker = html.escape(str(report.get("ticker", "")))
         report_date = html.escape(str(report.get("report_date", "")))
@@ -372,7 +539,7 @@ def render_dashboard(aggregate: dict[str, Any], runs: list[dict[str, Any]]) -> s
             f"<td>{report_date}</td>"
             f"<td><span class='badge {verdict.lower()}'>{verdict}</span></td>"
             f"<td><div class='summary'>{summary_text or '<em>No summary saved</em>'}</div></td>"
-            f"<td>{issue_text}<details><summary>Inspect JSON</summary><h4>Issues</h4><pre>{issues_detail}</pre><h4>Skeleton</h4><pre>{skeleton_detail}</pre><h4>Judge</h4><pre>{judge_detail}</pre></details></td>"
+            f"<td>{issue_text}{bullet_breakdown_html}<details><summary>Inspect JSON</summary><h4>Issues</h4><pre>{issues_detail}</pre><h4>Bullet evals</h4><pre>{bullet_evals_detail}</pre><h4>Skeleton</h4><pre>{skeleton_detail}</pre><h4>Judge</h4><pre>{judge_detail}</pre></details></td>"
             "</tr>"
         )
     return f"""
@@ -391,6 +558,7 @@ def render_dashboard(aggregate: dict[str, Any], runs: list[dict[str, Any]]) -> s
     .filters label {{ display: grid; gap: 6px; font-weight: 700; }}
     input, select {{ padding: 10px 12px; border: 1px solid #cddbd8; border-radius: 10px; min-width: 180px; }}
     .metric {{ font-size: 32px; font-weight: 750; }}
+    .submetric {{ color: #5b716e; font-size: 14px; margin-top: 4px; }}
     table {{ width: 100%; border-collapse: collapse; background: white; border-radius: 16px; overflow: hidden; }}
     th, td {{ padding: 12px 14px; border-bottom: 1px solid #edf2f1; text-align: left; vertical-align: top; }}
     th {{ background: #0b514b; color: white; }}
@@ -401,6 +569,8 @@ def render_dashboard(aggregate: dict[str, Any], runs: list[dict[str, Any]]) -> s
     .pass-with-flag {{ background: #fff3cf; color: #7a5400; }}
     .error {{ background: #eceff3; color: #344054; }}
     .summary {{ max-width: 420px; white-space: pre-wrap; }}
+    .issue-group {{ display: inline-block; min-width: 52px; padding: 2px 7px; border-radius: 999px; background: #e8f3f1; color: #0b514b; font-size: 12px; font-weight: 800; text-align: center; }}
+    .split {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin: 20px 0; }}
     details {{ margin-top: 8px; }}
     summary {{ cursor: pointer; color: #0b514b; font-weight: 700; }}
     pre {{ white-space: pre-wrap; max-width: 720px; background: #f6f8f8; border: 1px solid #e4ecea; border-radius: 12px; padding: 12px; }}
@@ -414,12 +584,26 @@ def render_dashboard(aggregate: dict[str, Any], runs: list[dict[str, Any]]) -> s
     <div class="card"><div>PASS</div><div class="metric">{aggregate["pass_count"]}</div></div>
     <div class="card"><div>FAIL</div><div class="metric">{aggregate["fail_count"]}</div></div>
     <div class="card"><div>PASS-WITH-FLAG</div><div class="metric">{aggregate["pass_with_flag_count"]}</div></div>
-    <div class="card"><div>Hallucination</div><div class="metric">{aggregate["hallucination_count"]}</div></div>
+    <div class="card"><div>Pass rate</div><div class="metric">{format_rate(aggregate.get("pass_rate"))}</div></div>
+    <div class="card"><div>Hallucination</div><div class="metric">{aggregate["hallucination_count"]}</div><div class="submetric">{format_rate(aggregate.get("hallucination_rate"))} of evals</div></div>
     <div class="card"><div>Buy violation</div><div class="metric">{aggregate["buy_violation_count"]}</div></div>
   </section>
+  <section class="split">
+    <div class="card">
+      <h2>Judge taxonomy groups</h2>
+      <ul>{group_items or "<li>No issues yet</li>"}</ul>
+    </div>
+    <div class="card">
+      <h2>Failure breakdown</h2>
+      <ul>{breakdown_items or "<li>No issues yet</li>"}</ul>
+    </div>
+  </section>
   <section class="card">
-    <h2>Failure breakdown</h2>
-    <ul>{breakdown_items or "<li>No issues yet</li>"}</ul>
+    <h2>Daily trend</h2>
+    <table>
+      <thead><tr><th>Eval date</th><th>Total</th><th>Pass rate</th><th>PASS</th><th>FAIL</th><th>FLAG</th><th>ERROR</th><th>Hallucination</th><th>Buy</th></tr></thead>
+      <tbody>{"".join(trend_rows) or "<tr><td colspan='9'>No daily trend yet.</td></tr>"}</tbody>
+    </table>
   </section>
   <h2>Latest eval runs</h2>
   <section class="filters">

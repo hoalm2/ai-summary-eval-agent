@@ -136,6 +136,20 @@ class LLMClient:
         return content or ""
 
     def _mock_json_response(self, *, system_prompt: str, user_prompt: str) -> str:
+        if "align each bullet" in system_prompt.lower():
+            return json.dumps(
+                {
+                    "bullet_evals": [
+                        {
+                            "bullet_index": 1,
+                            "bullet_text": "Mock bullet 1",
+                            "report_citations": ["MOCK_LLM_MODE bullet alignment; no GreenNode tokens used."],
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            )
+
         if "Summary Eval Judge" not in system_prompt:
             return json.dumps(
                 {

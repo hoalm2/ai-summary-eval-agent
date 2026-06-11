@@ -28,8 +28,12 @@ create table if not exists eval_runs (
   verdict text not null,
   blocks jsonb not null default '[]'::jsonb,
   flags jsonb not null default '[]'::jsonb,
+  bullet_evals jsonb not null default '[]'::jsonb,
   created_at timestamptz not null default now()
 );
+
+alter table if exists eval_runs
+  add column if not exists bullet_evals jsonb not null default '[]'::jsonb;
 
 create table if not exists agent_state (
   key text primary key,

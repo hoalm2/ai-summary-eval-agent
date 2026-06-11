@@ -144,6 +144,7 @@ class SupabaseStore:
         verdict: str,
         blocks: list[dict[str, Any]],
         flags: list[dict[str, Any]],
+        bullet_evals: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         payload = {
             "report_id": report_id,
@@ -153,6 +154,7 @@ class SupabaseStore:
             "verdict": verdict,
             "blocks": blocks,
             "flags": flags,
+            "bullet_evals": bullet_evals or [],
         }
         response = self.client.table("eval_runs").insert(payload).execute()
         return response.data[0]
@@ -160,7 +162,7 @@ class SupabaseStore:
     def fetch_eval_runs(self, *, limit: int = 100) -> list[dict[str, Any]]:
         runs = (
             self.client.table("eval_runs")
-            .select("id, report_id, summary_id, skeleton_json, judge_json, verdict, blocks, flags, created_at")
+            .select("id, report_id, summary_id, skeleton_json, judge_json, verdict, blocks, flags, bullet_evals, created_at")
             .order("created_at", desc=True)
             .limit(limit)
             .execute()

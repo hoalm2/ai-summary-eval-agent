@@ -9,7 +9,7 @@ from pipeline.llm import LLMClient, read_prompt
 
 
 PROMPT_PATH = "prompts/eval_judge.md"
-FORMAT_SPEC = "Summary phải là tiếng Việt, tối đa 5 bullet points, mỗi bullet 1–2 câu, không nêu giá mua."
+FORMAT_SPEC = "Summary phải là tiếng Việt, tối đa 4 bullet points, mỗi bullet 1–2 câu, không nêu giá mua, giá vào lệnh, hay khuyến nghị thời điểm mua."
 
 
 def judge_summary(
@@ -17,6 +17,7 @@ def judge_summary(
     report_text: str,
     summary_text: str,
     skeleton_json: dict[str, Any] | None = None,
+    bullet_evals: list[dict[str, Any]] | None = None,
     llm_client: LLMClient | None = None,
     settings: Settings | None = None,
 ) -> dict[str, Any]:
@@ -37,6 +38,9 @@ def judge_summary(
 <SKELETON>
 {json.dumps(skeleton_json or {}, ensure_ascii=False)}
 </SKELETON>
+<BULLET_EVALS>
+{json.dumps(bullet_evals or [], ensure_ascii=False)}
+</BULLET_EVALS>
 """
     llm_result = llm_client.json_chat(
         model=settings.model_judge,
@@ -59,5 +63,6 @@ def judge_summary(
         "judge_json": judge_json,
         "parse_error": llm_result.parse_error,
         "rationale": judge_json.get("rationale", "") if isinstance(judge_json, dict) else "",
+        "bullet_evals": bullet_evals or [],
     }
 
