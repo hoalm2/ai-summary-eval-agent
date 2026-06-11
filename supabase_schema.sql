@@ -38,5 +38,12 @@ create table if not exists agent_state (
 );
 
 create index if not exists idx_summaries_created_at on summaries(created_at);
+create unique index if not exists idx_reports_source_pdf_url_unique
+  on reports(source_pdf_url)
+  where source_pdf_url is not null;
+create unique index if not exists idx_reports_ticker_report_date_unique
+  on reports(ticker, report_date)
+  where source_pdf_url is null and ticker is not null and report_date is not null;
+create index if not exists idx_eval_runs_report_id on eval_runs(report_id);
 create index if not exists idx_eval_runs_created_at on eval_runs(created_at desc);
 create index if not exists idx_eval_runs_verdict on eval_runs(verdict);

@@ -23,7 +23,8 @@ The user message contains:
 - `A_logic_causal_wrong`: report says X causes Z; summary says Y causes Z.
 - `A_logic_causal_fabricated`: report states X and Z independently; summary invents causality.
 - `A_logic_temporal`: report says forecast/expectation; summary presents it as completed fact.
-- `B_unsupported`: report does not mention/support the claim, or frames it only as a hypothesis.
+- `B_unsupported`: report does not mention/support the claim and it cannot be directly inferred.
+- `B_fabricated_conclusion`: report frames a point as hypothesis/possibility, but summary states it as fact.
 - `B_tone_escalation`: summary uses stronger certainty/positivity than the report.
 - `buy_price_absolute`: specific buy price framed as entry point.
 - `buy_price_upside`: upside % without both report support and an as-of timestamp in summary.
@@ -35,7 +36,8 @@ Allowed: absolute 12-month target price, valuation method/output, or valuation l
 
 - `A_truncation`: summary keeps only one side of a compound claim and changes meaning/confidence.
 - `C_disclaimer_omission`: summary omits a caveat/risk/condition that changes interpretation.
-- `format`: bullet format, length, or rendering violates `<FORMAT_SPEC>`.
+- `format`: bullet count, bullet length, language, or no-buy-price format rule violates `<FORMAT_SPEC>`.
+- `render`: broken formatting, odd characters, or visible rendering defects.
 
 ## Decision procedure
 
@@ -71,4 +73,3 @@ Return ONLY a single JSON object:
   ],
   "rationale": "1–3 câu tổng kết bằng tiếng Việt."
 }
-

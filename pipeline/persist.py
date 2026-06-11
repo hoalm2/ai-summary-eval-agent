@@ -55,6 +55,23 @@ class SupabaseStore:
         return self._attach_reports(summaries)
 
     def fetch_unevaluated_reports(self, *, limit: int = 5) -> list[dict[str, Any]]:
+        try:
+            reports = (
+                self.client.table("reports")
+                .select("id, ticker, report_date, source_pdf_url, pdf_storage_path, report_text, status, created_at, eval_runs!left(id)")
+                .is_("eval_runs.id", "null")
+                .or_("report_text.not.is.null,source_pdf_url.not.is.null")
+                .order("created_at")
+                .limit(limit)
+                .execute()
+                .data
+                or []
+            )
+            return [{key: value for key, value in report.items() if key != "eval_runs"} for report in reports]
+        except Exception:
+            return self._fetch_unevaluated_reports_fallback(limit=limit)
+
+    def _fetch_unevaluated_reports_fallback(self, *, limit: int = 5) -> list[dict[str, Any]]:
         eval_runs = self.client.table("eval_runs").select("report_id").execute().data or []
         evaluated_report_ids = {item["report_id"] for item in eval_runs if item.get("report_id")}
         reports = (
@@ -196,7 +213,7 @@ class SupabaseStore:
             for issue in (run.get("blocks") or []) + (run.get("flags") or []):
                 category = issue.get("category", "unknown")
                 failure_breakdown[category] = failure_breakdown.get(category, 0) + 1
-                if category in {"A_factual", "B_unsupported"}:
+                if category.startswith(("A_", "B_")):
                     hallucination_count += 1
                 if category.startswith("buy_price"):
                     buy_violation_count += 1

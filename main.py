@@ -184,6 +184,31 @@ def generate_and_evaluate_report(report: dict[str, Any], store: SupabaseStore | 
     return evaluate_record({"report": report, "summary": summary}, store)
 
 
+def generate_and_evaluate_report_safely(report: dict[str, Any], store: SupabaseStore | None = None) -> dict[str, Any]:
+    store = store or SupabaseStore()
+    try:
+        return generate_and_evaluate_report(report, store)
+    except Exception as exc:
+        reason = f"Unexpected daily evaluation error: {type(exc).__name__}: {exc}"
+        try:
+            return persist_error_eval(
+                store=store,
+                report=report,
+                summary_text="",
+                summary_model="unexpected_error",
+                reason=reason,
+            )
+        except Exception:
+            return {
+                "result": {
+                    "verdict": "ERROR",
+                    "blocks": [],
+                    "flags": [],
+                    "judge_json": {"verdict": "ERROR", "rationale": reason, "persisted": False},
+                }
+            }
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -270,7 +295,7 @@ def run_daily(x_demo_token: str | None = Header(default=None)) -> dict[str, Any]
     reports = store.fetch_unevaluated_reports(limit=settings.daily_batch_size)
     if not reports:
         return {"processed": 0, "message": "no unevaluated reports"}
-    outputs = [generate_and_evaluate_report(report, store) for report in reports]
+    outputs = [generate_and_evaluate_report_safely(report, store) for report in reports]
     store.set_state("last_daily_run", {"processed": len(outputs), "mode": "mock" if settings.mock_llm_mode else "greennode"})
     return {"processed": len(outputs), "outputs": outputs}
 
