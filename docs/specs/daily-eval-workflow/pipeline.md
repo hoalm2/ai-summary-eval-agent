@@ -4,15 +4,37 @@ Detailed technical reference for each stage of the eval pipeline. Covers input/o
 
 ---
 
+## Contest vs Production Pipeline
+
+The pipeline is designed so Stage 2 (summary generation) is a **contest-only shim** that can be removed without touching any other stage.
+
+**Contest flow** (current — no access to internal DB):
+```
+Stage 0 → Stage 1 → Stage 2 → Stage 1b → Stage 3 → persist
+```
+
+**Production flow** (post-contest — summary already exists in internal DB):
+```
+Stage 0 → Stage 1 → Stage 1b → Stage 3 → persist
+```
+
+Switching to production requires only:
+1. Remove the `generate_summary()` call in `generate_and_evaluate_report()`
+2. Feed the pre-existing `summary_text` from the internal DB into `align_bullets()` and `judge_summary()` directly
+
+No changes to Stage 1b, Stage 3, persist, or dashboard.
+
+---
+
 ## Entry Points
 
 There are three ways the pipeline is triggered, all via HTTP:
 
 | Endpoint | Trigger | What it runs |
 |---|---|---|
-| `POST /run-daily` | Manual (demo) or cron | Full pipeline for unevaluated reports: PDF → Stage 1 → Stage 2 → Stage 3 → persist |
-| `POST /run-demo` | Demo mode | Stage 3 only on already-stored summaries (skips generation) |
-| `POST /run-one` | Ad hoc / testing | Stage 1 + Stage 3 on inline report + summary text; optional persist |
+| `POST /run-daily` | Manual (demo) or cron | Full pipeline: PDF → Stage 1 → Stage 2 → Stage 1b → Stage 3 → persist |
+| `POST /run-demo` | Demo mode | Stage 1 + Stage 1b + Stage 3 on already-stored summaries (skips Stage 2) |
+| `POST /run-one` | Ad hoc / testing | Stage 1 + Stage 1b + Stage 3 on inline report + summary text; optional persist |
 
 All write-enabled endpoints require `X-Demo-Token` header.
 
@@ -106,7 +128,57 @@ The skeleton is passed as a hint to Stage 3, and persisted as `eval_runs.skeleto
 
 ---
 
-## Stage 2 — Summary Generation
+## Stage 1b — Per-bullet Citation Alignment
+
+**File:** `pipeline/stage1b_align.py` — `align_bullets()`  
+**Prompt:** `prompts/bullet_alignment.md`  
+**Model:** `settings.model_skeleton` (default: `qwen3-5-27b`)  
+**LLM call type:** `json_chat`  
+**Max tokens:** `settings.skeleton_max_tokens`
+
+Runs **after Stage 2** in the contest flow, or **immediately after Stage 1** in production (when summary is pre-existing). For each bullet in the summary, finds 1–3 verbatim quotes from the report that a reader would need to verify or refute that bullet's claim.
+
+This stage is what enables per-bullet eval in Stage 3 and the bullet-level breakdown in the dashboard.
+
+### Input
+
+```
+report_text: str      # full report text
+summary_text: str     # the generated (or pre-existing) summary
+```
+
+### User prompt structure
+
+```
+<REPORT>{report_text}</REPORT>
+<SUMMARY>{summary_text}</SUMMARY>
+```
+
+### Output
+
+```json
+[
+  {
+    "bullet_index": 1,
+    "bullet_text": "<exact bullet text from summary>",
+    "report_citations": [
+      "<verbatim quote from report>",
+      "<verbatim quote from report>"
+    ]
+  }
+]
+```
+
+Returns `[]` on parse error — Stage 3 degrades gracefully (falls back to full report scan).
+
+### Error paths
+
+- Parse error after 2 retries → returns `[]`, pipeline continues
+- In mock mode → returns a single placeholder bullet with `"MOCK_LLM_MODE bullet alignment"` citation
+
+---
+
+## Stage 2 — Summary Generation (contest only)
 
 **File:** `pipeline/stage2_summary.py` — `generate_summary()`  
 **Prompt:** `prompts/summary_generate.md`  
