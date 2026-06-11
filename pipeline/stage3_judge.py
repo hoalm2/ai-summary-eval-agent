@@ -12,6 +12,37 @@ PROMPT_PATH = "prompts/eval_judge.md"
 FORMAT_SPEC = "Summary phải là tiếng Việt, tối đa 4 bullet points, mỗi bullet 1–2 câu, không nêu giá mua, giá vào lệnh, hay khuyến nghị thời điểm mua."
 
 
+def _enrich_issues_with_bullet_context(
+    issues: list[dict[str, Any]],
+    bullet_evals: list[dict[str, Any]],
+) -> None:
+    """Mutates issues in-place: adds bullet_index + bullet_text so the JSON is self-explaining.
+
+    For LLM-judge issues that already carry bullet_index, only bullet_text is added.
+    For deterministic issues (no bullet_index), infers the bullet by checking which
+    bullet_text contains the summary_quote substring.
+    """
+    if not bullet_evals:
+        return
+    text_by_index: dict[int, str] = {
+        int(be["bullet_index"]): str(be.get("bullet_text", ""))
+        for be in bullet_evals
+        if be.get("bullet_index") is not None
+    }
+    for issue in issues:
+        idx = issue.get("bullet_index")
+        if idx is not None:
+            issue["bullet_text"] = text_by_index.get(int(idx), "")
+        else:
+            quote = str(issue.get("summary_quote", "")).lower()
+            if quote:
+                for be in bullet_evals:
+                    if quote in str(be.get("bullet_text", "")).lower():
+                        issue["bullet_index"] = be["bullet_index"]
+                        issue["bullet_text"] = be.get("bullet_text", "")
+                        break
+
+
 def judge_summary(
     *,
     report_text: str,
@@ -53,6 +84,7 @@ def judge_summary(
     llm_flags = judge_json.get("flags", []) if isinstance(judge_json, dict) else []
     blocks = merge_issues(deterministic.blocks, llm_blocks)
     flags = merge_issues(deterministic.flags, llm_flags)
+    _enrich_issues_with_bullet_context(blocks + flags, bullet_evals or [])
     verdict = compute_verdict(blocks, flags, llm_result.parse_error)
     return {
         "verdict": verdict,

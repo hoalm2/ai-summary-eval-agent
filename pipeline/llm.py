@@ -165,22 +165,34 @@ class LLMClient:
             )
 
         summary = user_prompt.lower()
-        blocks: list[dict[str, str]] = []
-        flags: list[dict[str, str]] = []
+        bullets = [line.strip() for line in user_prompt.split("\n") if line.strip().startswith("•")]
+
+        def _bullet_index_for(quote: str) -> int | None:
+            q = quote.lower()
+            for i, b in enumerate(bullets, start=1):
+                if q in b.lower():
+                    return i
+            return 1 if bullets else None
+
+        blocks: list[dict] = []
+        flags: list[dict] = []
         if "nên mua ngay" in summary or "tiềm năng tăng giá" in summary:
             blocks.append(
                 {
                     "category": "buy_price_timing",
+                    "bullet_index": _bullet_index_for("nên mua ngay"),
                     "summary_quote": "nên mua ngay",
                     "report_evidence": "not present in report",
                     "explanation": "Mock judge phát hiện framing thời điểm mua.",
                 }
             )
         if "bứt phá" in summary or "tăng vọt" in summary:
+            quote = "bứt phá" if "bứt phá" in summary else "tăng vọt"
             blocks.append(
                 {
                     "category": "B_tone_escalation",
-                    "summary_quote": "bứt phá/tăng vọt",
+                    "bullet_index": _bullet_index_for(quote),
+                    "summary_quote": quote,
                     "report_evidence": "cải thiện",
                     "explanation": "Mock judge phát hiện tone escalation.",
                 }
@@ -189,6 +201,7 @@ class LLMClient:
             blocks.append(
                 {
                     "category": "A_logic_temporal",
+                    "bullet_index": _bullet_index_for("đã phục hồi"),
                     "summary_quote": "đã phục hồi",
                     "report_evidence": "kỳ vọng",
                     "explanation": "Mock judge phát hiện forecast bị trình bày như fact đã xảy ra.",
@@ -198,6 +211,7 @@ class LLMClient:
             flags.append(
                 {
                     "category": "C_disclaimer_omission",
+                    "bullet_index": None,
                     "summary_quote": "",
                     "report_evidence": "Rủi ro chính",
                     "explanation": "Mock judge phát hiện omission disclaimer.",
