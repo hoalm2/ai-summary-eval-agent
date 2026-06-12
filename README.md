@@ -5,17 +5,18 @@ Supabase-backed MVP agent for evaluating Vietnamese stock-research AI summaries.
 ## Architecture
 
 ```text
-Supabase reports
-  -> Stage 2: generate daily summary
-  -> Stage 1: skeleton extraction
-  -> Stage 3: judge using full report text as ground truth
-  -> deterministic factcheck + code-computed verdict
-  -> Supabase summaries
-  -> Supabase eval_runs
+Supabase reports (source_pdf_url)
+  -> Stage 0: fetch + extract PDF text
+  -> Stage 1: skeleton extraction (qwen3-5-27b)
+  -> Stage 2: generate summary (qwen3-5-27b)
+  -> Stage 1b: per-bullet citation alignment (qwen3-5-27b)
+  -> Stage 3: LLM judge + deterministic factcheck (gemma-4-31b-it)
+  -> code-computed verdict (PASS / FAIL / PASS-WITH-FLAG / ERROR)
+  -> Supabase summaries + eval_runs
   -> /dashboard
 ```
 
-This repo has **3 LLM stages + 1 persistence step**. During token-free testing, those LLM stages are mocked locally with `MOCK_LLM_MODE=true`; Supabase reads/writes and dashboard behavior still run for real.
+This repo has **4 LLM stages + 1 persistence step**. During token-free testing, those LLM stages are mocked locally with `MOCK_LLM_MODE=true`; Supabase reads/writes and dashboard behavior still run for real.
 
 ## Storage Decision
 
@@ -54,7 +55,7 @@ Tables:
 - `reports`: report metadata, URL, optional storage path, and extracted text.
 - `summaries`: generated summary text linked to a report.
 - `eval_runs`: append-only evaluation history.
-- `agent_state`: cursor state such as `last_daily_index`.
+- `agent_state`: runtime flags and cursors — `pipeline_enabled` (kill switch), `last_daily_run` (last batch metadata).
 
 ## Environment
 
@@ -198,8 +199,11 @@ Rules:
 - `GET /status`: deployment smoke test without exposing secrets; shows mock mode, Supabase connectivity, and row counts.
 - `GET /results`: safe JSON eval history, excluding full `report_text`.
 - `GET /dashboard`: HTML dashboard with aggregate metrics, verdict/ticker/date filters, generated summaries, issue details, skeleton JSON, and judge JSON.
+- `GET /pipeline/status`: current kill-switch state and last batch metadata.
+- `POST /pipeline/enable`: enable `/run-daily` (requires `X-Demo-Token`).
+- `POST /pipeline/disable`: disable `/run-daily` — any trigger returns immediately, 0 LLM calls (requires `X-Demo-Token`).
 - `POST /run-demo`: evaluates up to 2 first summaries; does not advance daily cursor.
-- `POST /run-daily`: picks next 5 unevaluated reports, generates summaries, judges them, and writes eval results.
+- `POST /run-daily`: picks next 5 unevaluated reports, generates summaries, judges them, and writes eval results. No-op when pipeline is disabled or no unevaluated reports remain.
 - `POST /run-one`: ad hoc evaluation; can optionally persist if `report_id` and `summary_id` are supplied.
 - `POST /reports/import`: protected static report ingestion for post-deploy use.
 
@@ -214,7 +218,7 @@ During token-free testing, all protected trigger endpoints still exercise Supaba
 - Too-short PDF extraction is marked with `extract_too_short` / `report_text_too_short` and persisted as `ERROR`.
 - Dashboard hides full report text.
 - Token caps: skeleton `1800`, summary `900`, judge `1800` max tokens by default.
-- Expected latency depends on GreenNode model speed; budget roughly 2 LLM calls per daily eval item.
+- Expected latency depends on GreenNode model speed; budget 4 LLM calls per report (Stage 1, 2, 1b, 3).
 
 ## AgentBase Deploy
 
