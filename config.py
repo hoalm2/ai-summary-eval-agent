@@ -38,6 +38,7 @@ class Settings:
     greennode_json_mode: bool
     mock_llm_mode: bool
     model_skeleton: str
+    model_align: str
     model_summary: str
     model_judge: str
     model_fallback: str
@@ -62,10 +63,11 @@ def get_settings() -> Settings:
         greennode_base_url=os.getenv("GREENNODE_BASE_URL", "https://maas-llm-aiplatform-hcm.api.vngcloud.vn/v1"),
         greennode_json_mode=_bool_env("GREENNODE_JSON_MODE", True),
         mock_llm_mode=_bool_env("MOCK_LLM_MODE", False),
-        model_skeleton=os.getenv("MODEL_SKELETON", "qwen3-5-27b"),
-        model_summary=os.getenv("MODEL_SUMMARY", "qwen3-5-27b"),
-        model_judge=os.getenv("MODEL_JUDGE", "gemma-4-31b-it"),
-        model_fallback=os.getenv("MODEL_FALLBACK", "MiniMax-M2.5"),
+        model_skeleton=os.getenv("MODEL_SKELETON", "gemini/gemini-3.1-pro-preview"),
+        model_align=os.getenv("MODEL_ALIGN", os.getenv("MODEL_SKELETON", "gemini/gemini-3.1-pro-preview")),
+        model_summary=os.getenv("MODEL_SUMMARY", "openai/gpt-5-mini"),
+        model_judge=os.getenv("MODEL_JUDGE", "openai/gpt-5-mini"),
+        model_fallback=os.getenv("MODEL_FALLBACK", "deepseek/deepseek-v4-pro"),
         supabase_url=os.getenv("SUPABASE_URL", ""),
         supabase_service_role_key=os.getenv("SUPABASE_SERVICE_ROLE_KEY", ""),
         demo_token=os.getenv("DEMO_TOKEN", ""),

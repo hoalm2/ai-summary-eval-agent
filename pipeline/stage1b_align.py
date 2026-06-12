@@ -37,7 +37,7 @@ def align_bullets(
 </SUMMARY>
 """
     result = llm_client.json_chat(
-        model=settings.model_skeleton,
+        model=settings.model_align,
         system_prompt=system_prompt,
         user_prompt=user_prompt,
         max_tokens=settings.skeleton_max_tokens,
