@@ -28,7 +28,7 @@
 - [ ] `/run-demo` processes at most the configured demo batch size and persists eval runs.
       verify: `curl -X POST http://localhost:8080/run-demo -H "X-Demo-Token: $DEMO_TOKEN"`
 
-- [ ] `/run-daily` picks unevaluated reports, generates summaries, judges them, and persists eval runs.
+- [ ] `/run-daily` picks unevaluated pre-created summaries, judges them, and persists eval runs.
       verify: `curl -X POST http://localhost:8080/run-daily -H "X-Demo-Token: $DEMO_TOKEN"`
 
 ## Eval Validity

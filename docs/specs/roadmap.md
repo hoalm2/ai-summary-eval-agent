@@ -28,6 +28,6 @@
 
 - Supabase-backed MVP exists.
 - Reports can be imported or preloaded into Supabase.
-- `/run-daily` can generate summaries, judge them, persist `eval_runs`, and render dashboard.
+- `/run-daily` can evaluate pre-created summaries, persist `eval_runs`, and render dashboard.
 - Mock LLM mode prevents development token burn.
 - Official AgentBase skills are installed project-locally under `.agents/skills`.

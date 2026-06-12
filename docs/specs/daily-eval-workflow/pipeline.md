@@ -6,23 +6,19 @@ Detailed technical reference for each stage of the eval pipeline. Covers input/o
 
 ## Contest vs Production Pipeline
 
-The pipeline is designed so Stage 2 (summary generation) is a **contest-only shim** that can be removed without touching any other stage.
+The pipeline is designed so Stage 2 (summary generation) is a **contest-only shim**. The main `/run-daily` flow now uses pre-created summaries from Supabase and skips Stage 2.
 
-**Contest flow** (current — no access to internal DB):
+**Contest shim flow** (kept for ad hoc use):
 ```
 Stage 0 → Stage 1 → Stage 2 → Stage 1b → Stage 3 → persist
 ```
 
-**Production flow** (post-contest — summary already exists in internal DB):
+**Production-like daily flow** (current):
 ```
 Stage 0 → Stage 1 → Stage 1b → Stage 3 → persist
 ```
 
-Switching to production requires only:
-1. Remove the `generate_summary()` call in `generate_and_evaluate_report()`
-2. Feed the pre-existing `summary_text` from the internal DB into `align_bullets()` and `judge_summary()` directly
-
-No changes to Stage 1b, Stage 3, persist, or dashboard.
+`/run-daily` picks rows from `summaries` that have no `eval_runs` yet, attaches their reports, then feeds the existing `summary_text` into `align_bullets()` and `judge_summary()` directly.
 
 ---
 
@@ -32,7 +28,7 @@ There are three ways the pipeline is triggered, all via HTTP:
 
 | Endpoint | Trigger | What it runs |
 |---|---|---|
-| `POST /run-daily` | Manual (demo) or cron | Full pipeline: PDF → Stage 1 → Stage 2 → Stage 1b → Stage 3 → persist |
+| `POST /run-daily` | Manual (demo) or cron | Production-like flow: PDF → Stage 1 → Stage 1b → Stage 3 → persist |
 | `POST /run-demo` | Demo mode | Stage 1 + Stage 1b + Stage 3 on already-stored summaries (skips Stage 2) |
 | `POST /run-one` | Ad hoc / testing | Stage 1 + Stage 1b + Stage 3 on inline report + summary text; optional persist |
 
@@ -186,7 +182,7 @@ Returns `[]` on parse error — Stage 3 degrades gracefully (falls back to full 
 **LLM call type:** `text_chat` (free-text, not JSON)  
 **Max tokens:** `settings.summary_max_tokens`
 
-Only called by `/run-daily` (`generate_and_evaluate_report`). The `/run-demo` and `/run-one` endpoints receive a pre-written summary and skip this stage.
+Not called by the main `/run-daily` flow. Kept as a contest/demo shim through `generate_and_evaluate_report()`. The `/run-demo`, `/run-one`, and production-like `/run-daily` paths receive a pre-written summary and skip this stage.
 
 ### Input
 
@@ -211,7 +207,7 @@ Ticker: {ticker}
 summary_text: str    # Vietnamese bullet summary, ≤ 5 bullets, 1–2 sentences each
 ```
 
-The summary is immediately written to the `summaries` table before Stage 3 runs, so a failure in Stage 3 does not cause data loss.
+When the contest shim is used, the generated summary is immediately written to the `summaries` table before Stage 3 runs, so a failure in Stage 3 does not cause data loss.
 
 ### Error paths
 
@@ -379,13 +375,13 @@ Called from `main.py` after Stage 3 completes.
 Errors are contained at the per-report level so a bad report does not abort the batch:
 
 ```
-generate_and_evaluate_report_safely()
-  └─ generate_and_evaluate_report()  [may raise]
-       └─ caught → persist_error_eval() → ERROR verdict inserted
+evaluate_record_safely()
+  └─ evaluate_record()  [may raise]
+       └─ caught → insert_eval_run() with ERROR verdict
             └─ if persist itself fails → returns in-memory ERROR result (not persisted)
 ```
 
-The daily batch iterates `[generate_and_evaluate_report_safely(r) for r in reports]`. One ERROR does not stop subsequent reports.
+The daily batch iterates `[evaluate_record_safely(r) for r in summary_records]`. One ERROR does not stop subsequent summaries.
 
 ---
 
@@ -396,7 +392,7 @@ Controlled by `MOCK_LLM_MODE` env var (default `true`).
 | Behavior | `MOCK_LLM_MODE=true` | `MOCK_LLM_MODE=false` |
 |---|---|---|
 | Stage 1 LLM call | Returns fixed skeleton JSON, 0 tokens | Calls GreenNode `qwen3-5-27b` |
-| Stage 2 LLM call | Returns fixed mock summary string | Calls GreenNode `qwen3-5-27b` |
+| Stage 2 LLM call | Skipped by `/run-daily`; returns fixed mock summary only in contest shim | Skipped by `/run-daily`; calls GreenNode only in contest shim |
 | Stage 3 LLM judge | Keyword-matches summary for `buy_price_timing`, `B_tone_escalation`, `A_logic_temporal`, `C_disclaimer_omission` | Calls GreenNode `gemma-4-31b-it` |
 | Deterministic factcheck | Runs normally (no LLM) | Runs normally |
 | Supabase reads/writes | Real | Real |

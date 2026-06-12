@@ -58,20 +58,21 @@ When `skip_existing=true` (default), duplicate reports are skipped silently.
 
 ## `summaries`
 
-Stores AI-generated summaries. One row per summary generation run. Created immediately after Stage 2 completes, before Stage 3 runs.
+Stores pre-created or generated summaries. One row per summary to evaluate. In the production-like daily flow, summaries are seeded before `/run-daily`; Stage 2 generation remains only as a contest/demo shim.
 
 | Column | Type | Nullable | Notes |
 |---|---|---|---|
 | `id` | uuid | No | Primary key |
 | `report_id` | uuid | No | FK → `reports.id` |
-| `summary_text` | text | No | Generated Vietnamese bullet summary |
-| `summary_model` | text | No | Model name used, or `"mock_llm"`, or error status string |
+| `summary_text` | text | No | Vietnamese bullet summary to evaluate |
+| `summary_model` | text | No | Source/model name, e.g. `"precreated"`, `"mock_llm"`, or model ID |
 | `created_at` | timestamptz | No | Auto-set |
 
 ### `summary_model` values
 
 | Value | Condition |
 |---|---|
+| `"precreated"` | Summary was imported/seeded before eval |
 | `"qwen3-5-27b"` (or current model) | Real GreenNode run |
 | `"mock_llm"` | `MOCK_LLM_MODE=true` |
 | `"unexpected_error"` | Stage 2 raised an unexpected exception |
@@ -186,17 +187,15 @@ POST /reports/import
   └─ insert into reports (status="ready" or "pending")
 
 /run-daily trigger
-  └─ fetch_unevaluated_reports()
-       └─ LEFT JOIN eval_runs on reports.id — returns reports with no existing eval_run
-  └─ for each report:
+  └─ fetch_unevaluated_summaries()
+       └─ LEFT JOIN eval_runs on summaries.id — returns summaries with no existing eval_run
+       └─ attach reports metadata/source text
+  └─ for each summary + report:
        ├─ ensure_report_text()
        │    ├─ (if source_pdf_url) fetch PDF → update reports.report_text + status="ready"
        │    └─ (if text too short) update reports.status → persist ERROR eval_run → stop
        │
        ├─ Stage 1: extract_skeleton(report_text) → skeleton_json
-       │
-       ├─ Stage 2: generate_summary(report_text) → summary_text
-       │    └─ insert_summary() → summaries row
        │
        ├─ Stage 3: judge_summary(report_text, summary_text, skeleton_json)
        │    ├─ deterministic_factcheck() → blocks, flags (code only)
@@ -213,10 +212,10 @@ POST /reports/import
   └─ aggregate() → counts, rates, breakdown
 ```
 
-### Unevaluated report selection
+### Unevaluated summary selection
 
-`fetch_unevaluated_reports()` uses a LEFT JOIN `eval_runs!left(id)` filtered by `is(eval_runs.id, null)` to find reports with no eval run. A fallback path fetches the last 200 reports and filters in Python when the join syntax is not supported by the Supabase version.
+`fetch_unevaluated_summaries()` uses a LEFT JOIN `eval_runs!left(id)` filtered by `is(eval_runs.id, null)` to find summaries with no eval run. A fallback path fetches the last 200 summaries and filters in Python when the join syntax is not supported by the Supabase version.
 
 ### Re-runs
 
-Re-running `/run-daily` on a report that already has an `eval_run` will **not** re-evaluate it — `fetch_unevaluated_reports()` filters those out. To force a re-eval, delete the existing `eval_run` row in Supabase.
+Re-running `/run-daily` on a summary that already has an `eval_run` will **not** re-evaluate it — `fetch_unevaluated_summaries()` filters those out. To force a re-eval, delete the existing `eval_run` row in Supabase.

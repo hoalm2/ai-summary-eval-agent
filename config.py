@@ -21,6 +21,16 @@ def _csv_env(name: str, default: str = "") -> set[str]:
     return {item.strip().lower() for item in os.getenv(name, default).split(",") if item.strip()}
 
 
+def _int_env(name: str, default: int) -> int:
+    value = os.getenv(name)
+    return int(value) if value is not None and value.strip() else default
+
+
+def _float_env(name: str, default: float) -> float:
+    value = os.getenv(name)
+    return float(value) if value is not None and value.strip() else default
+
+
 @dataclass(frozen=True)
 class Settings:
     greennode_api_key: str
@@ -61,7 +71,13 @@ def get_settings() -> Settings:
         demo_token=os.getenv("DEMO_TOKEN", ""),
         port=int(os.getenv("PORT", "8080")),
         allowed_pdf_hosts=_csv_env("ALLOWED_PDF_HOSTS", "cdn.simplize.vn"),
-        report_text_min_chars=int(os.getenv("REPORT_TEXT_MIN_CHARS", "80")),
+        request_timeout_seconds=_float_env("REQUEST_TIMEOUT_SECONDS", 60.0),
+        skeleton_max_tokens=_int_env("SKELETON_MAX_TOKENS", 1800),
+        summary_max_tokens=_int_env("SUMMARY_MAX_TOKENS", 900),
+        judge_max_tokens=_int_env("JUDGE_MAX_TOKENS", 1800),
+        daily_batch_size=_int_env("DAILY_BATCH_SIZE", 5),
+        demo_batch_size=_int_env("DEMO_BATCH_SIZE", 2),
+        report_text_min_chars=_int_env("REPORT_TEXT_MIN_CHARS", 80),
     )
 
 

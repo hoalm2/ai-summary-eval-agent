@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from config import get_settings
 from pipeline.pdf import extract_pdf_text, validate_pdf_source
+from pipeline.import_payload import build_report_payload, extract_items, get_summary_model, get_summary_text
 from pipeline.persist import SupabaseStore
 from pipeline.stage1_skeleton import extract_skeleton
 from pipeline.stage1b_align import align_bullets
@@ -37,18 +38,11 @@ class RunOneRequest(BaseModel):
     pdf_path_or_url: str | None = None
 
 
-class ReportImportItem(BaseModel):
-    ticker: str | None = None
-    report_date: str | None = None
-    source_pdf_url: str | None = None
-    pdf_storage_path: str | None = None
-    report_text: str | None = None
-    status: str = "ready"
-
-
 class ReportImportRequest(BaseModel):
-    reports: list[ReportImportItem]
+    reports: list[dict[str, Any]] | None = None
+    items: list[dict[str, Any]] | None = None
     skip_existing: bool = True
+    attach_missing_summaries: bool = False
 
 
 def require_demo_token(x_demo_token: str | None) -> None:
@@ -165,6 +159,40 @@ def evaluate_record(record: dict[str, Any], store: SupabaseStore | None = None) 
         bullet_evals=bullet_evals,
     )
     return {"eval_run": saved, "result": result}
+
+
+def evaluate_record_safely(record: dict[str, Any], store: SupabaseStore | None = None) -> dict[str, Any]:
+    store = store or SupabaseStore()
+    try:
+        return evaluate_record(record, store)
+    except Exception as exc:
+        report = record.get("report") or {}
+        summary = record.get("summary") or {}
+        reason = f"Unexpected daily evaluation error: {type(exc).__name__}: {exc}"
+        try:
+            saved = store.insert_eval_run(
+                report_id=report["id"],
+                summary_id=summary["id"],
+                skeleton_json={},
+                judge_json={"verdict": "ERROR", "rationale": reason},
+                verdict="ERROR",
+                blocks=[],
+                flags=[],
+                bullet_evals=[],
+            )
+            return {
+                "eval_run": saved,
+                "result": {"verdict": "ERROR", "blocks": [], "flags": [], "judge_json": {"verdict": "ERROR", "rationale": reason}},
+            }
+        except Exception:
+            return {
+                "result": {
+                    "verdict": "ERROR",
+                    "blocks": [],
+                    "flags": [],
+                    "judge_json": {"verdict": "ERROR", "rationale": reason, "persisted": False},
+                }
+            }
 
 
 def generate_and_evaluate_report(report: dict[str, Any], store: SupabaseStore | None = None) -> dict[str, Any]:
@@ -325,11 +353,18 @@ def run_daily(x_demo_token: str | None = Header(default=None)) -> dict[str, Any]
     store = SupabaseStore()
     if store.get_state("pipeline_enabled", True) is False:
         return {"processed": 0, "status": "disabled", "message": "pipeline is disabled — POST /pipeline/enable to re-enable"}
-    reports = store.fetch_unevaluated_reports(limit=settings.daily_batch_size)
-    if not reports:
-        return {"processed": 0, "message": "no unevaluated reports"}
-    outputs = [generate_and_evaluate_report_safely(report, store) for report in reports]
-    store.set_state("last_daily_run", {"processed": len(outputs), "mode": "mock" if settings.mock_llm_mode else "greennode"})
+    records = store.fetch_unevaluated_summaries(limit=settings.daily_batch_size)
+    if not records:
+        return {"processed": 0, "message": "no unevaluated summaries"}
+    outputs = [evaluate_record_safely(record, store) for record in records]
+    store.set_state(
+        "last_daily_run",
+        {
+            "processed": len(outputs),
+            "mode": "mock" if settings.mock_llm_mode else "greennode",
+            "summary_source": "precreated",
+        },
+    )
     return {"processed": len(outputs), "outputs": outputs}
 
 
@@ -338,35 +373,67 @@ def import_reports(payload: ReportImportRequest, x_demo_token: str | None = Head
     require_demo_token(x_demo_token)
     store = SupabaseStore()
     inserted: list[dict[str, Any]] = []
+    inserted_summaries: list[dict[str, Any]] = []
+    summaries_missing = 0
     skipped: list[dict[str, Any]] = []
-    for item in payload.reports:
-        if item.source_pdf_url:
-            validate_pdf_source(item.source_pdf_url)
-        if not item.report_text and not item.source_pdf_url:
+    items = extract_items(payload.model_dump(exclude_none=True))
+    if not items:
+        raise HTTPException(status_code=400, detail="Request needs reports[] or items[]")
+    for item in items:
+        report_payload = build_report_payload(item)
+        source_pdf_url = report_payload["source_pdf_url"]
+        report_text = report_payload["report_text"]
+        if source_pdf_url:
+            validate_pdf_source(source_pdf_url)
+        if not report_text and not source_pdf_url:
             raise HTTPException(status_code=400, detail="Each report needs report_text or source_pdf_url")
-        if item.report_text and len(item.report_text.strip()) < get_settings().report_text_min_chars:
+        if report_text and len(report_text.strip()) < get_settings().report_text_min_chars:
             raise HTTPException(status_code=400, detail="report_text is too short for reliable evaluation")
         existing = store.find_existing_report(
-            ticker=item.ticker,
-            report_date=item.report_date,
-            source_pdf_url=item.source_pdf_url,
+            ticker=report_payload["ticker"],
+            report_date=report_payload["report_date"],
+            source_pdf_url=source_pdf_url,
         )
         if existing and payload.skip_existing:
+            summary_text = get_summary_text(item)
+            if payload.attach_missing_summaries and summary_text and not store.find_summary_for_report(existing["id"]):
+                inserted_summaries.append(
+                    store.insert_summary(
+                        {
+                            "report_id": existing["id"],
+                            "summary_text": summary_text,
+                            "summary_model": get_summary_model(item),
+                        }
+                    )
+                )
+            elif payload.attach_missing_summaries and not summary_text:
+                summaries_missing += 1
             skipped.append(existing)
             continue
-        inserted.append(
-            store.insert_report(
-                {
-                    "ticker": item.ticker,
-                    "report_date": item.report_date,
-                    "source_pdf_url": item.source_pdf_url,
-                    "pdf_storage_path": item.pdf_storage_path,
-                    "report_text": item.report_text,
-                    "status": item.status if item.report_text else "pending",
-                }
+        report = store.insert_report(report_payload)
+        inserted.append(report)
+        summary_text = get_summary_text(item)
+        if summary_text:
+            inserted_summaries.append(
+                store.insert_summary(
+                    {
+                        "report_id": report["id"],
+                        "summary_text": summary_text,
+                        "summary_model": get_summary_model(item),
+                    }
+                )
             )
-        )
-    return {"inserted": len(inserted), "skipped": len(skipped), "reports": inserted, "skipped_reports": skipped}
+        else:
+            summaries_missing += 1
+    return {
+        "inserted": len(inserted),
+        "summaries_inserted": len(inserted_summaries),
+        "summaries_missing": summaries_missing,
+        "skipped": len(skipped),
+        "reports": inserted,
+        "summaries": inserted_summaries,
+        "skipped_reports": skipped,
+    }
 
 
 @app.get("/dashboard", response_class=HTMLResponse)

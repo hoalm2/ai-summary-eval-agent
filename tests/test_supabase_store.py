@@ -31,6 +31,9 @@ class FakeTable:
     def or_(self, *_: Any) -> "FakeTable":
         return self
 
+    def in_(self, *_: Any) -> "FakeTable":
+        return self
+
     def order(self, *_: Any, **__: Any) -> "FakeTable":
         return self
 
@@ -51,6 +54,81 @@ class FakeClient:
 
 
 class SupabaseStoreTests(unittest.TestCase):
+    def test_fetch_unevaluated_summaries_strips_embedded_eval_runs_and_attaches_reports(self) -> None:
+        store = object.__new__(SupabaseStore)
+        store.client = FakeClient(
+            {
+                "summaries": FakeTable(
+                    [
+                        {
+                            "id": "summary-1",
+                            "report_id": "report-1",
+                            "summary_text": "• Summary",
+                            "summary_model": "precreated",
+                            "eval_runs": [],
+                        }
+                    ]
+                ),
+                "reports": FakeTable(
+                    [
+                        {
+                            "id": "report-1",
+                            "ticker": "AAA",
+                            "report_text": "text",
+                            "source_pdf_url": None,
+                        }
+                    ]
+                ),
+            }
+        )
+
+        records = SupabaseStore.fetch_unevaluated_summaries(store, limit=5)
+
+        self.assertEqual(
+            records,
+            [
+                {
+                    "summary": {
+                        "id": "summary-1",
+                        "report_id": "report-1",
+                        "summary_text": "• Summary",
+                        "summary_model": "precreated",
+                    },
+                    "report": {
+                        "id": "report-1",
+                        "ticker": "AAA",
+                        "report_text": "text",
+                        "source_pdf_url": None,
+                    },
+                }
+            ],
+        )
+
+    def test_fetch_unevaluated_summaries_fallback_filters_evaluated_summaries(self) -> None:
+        store = object.__new__(SupabaseStore)
+        store.client = FakeClient(
+            {
+                "eval_runs": FakeTable([{"summary_id": "already-done"}]),
+                "summaries": FakeTable(
+                    [
+                        {"id": "already-done", "report_id": "report-1", "summary_text": "done"},
+                        {"id": "ready-summary", "report_id": "report-2", "summary_text": "ready"},
+                    ],
+                    fail_select_count=1,
+                ),
+                "reports": FakeTable(
+                    [
+                        {"id": "report-1", "ticker": "OLD"},
+                        {"id": "report-2", "ticker": "NEW"},
+                    ]
+                ),
+            }
+        )
+
+        records = SupabaseStore.fetch_unevaluated_summaries(store, limit=5)
+
+        self.assertEqual([record["summary"]["id"] for record in records], ["ready-summary"])
+
     def test_fetch_unevaluated_reports_strips_embedded_eval_runs(self) -> None:
         store = object.__new__(SupabaseStore)
         store.client = FakeClient(

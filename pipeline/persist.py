@@ -54,6 +54,38 @@ class SupabaseStore:
         )
         return self._attach_reports(summaries)
 
+    def fetch_unevaluated_summaries(self, *, limit: int = 5) -> list[dict[str, Any]]:
+        try:
+            summaries = (
+                self.client.table("summaries")
+                .select("id, report_id, summary_text, summary_model, created_at, eval_runs!left(id)")
+                .is_("eval_runs.id", "null")
+                .order("created_at")
+                .limit(limit)
+                .execute()
+                .data
+                or []
+            )
+            clean_summaries = [{key: value for key, value in summary.items() if key != "eval_runs"} for summary in summaries]
+            return self._attach_reports(clean_summaries)
+        except Exception:
+            return self._fetch_unevaluated_summaries_fallback(limit=limit)
+
+    def _fetch_unevaluated_summaries_fallback(self, *, limit: int = 5) -> list[dict[str, Any]]:
+        eval_runs = self.client.table("eval_runs").select("summary_id").execute().data or []
+        evaluated_summary_ids = {item["summary_id"] for item in eval_runs if item.get("summary_id")}
+        summaries = (
+            self.client.table("summaries")
+            .select("id, report_id, summary_text, summary_model, created_at")
+            .order("created_at")
+            .limit(200)
+            .execute()
+            .data
+            or []
+        )
+        unevaluated = [summary for summary in summaries if summary.get("id") not in evaluated_summary_ids][:limit]
+        return self._attach_reports(unevaluated)
+
     def fetch_unevaluated_reports(self, *, limit: int = 5) -> list[dict[str, Any]]:
         try:
             reports = (
@@ -133,6 +165,10 @@ class SupabaseStore:
     def insert_summary(self, payload: dict[str, Any]) -> dict[str, Any]:
         response = self.client.table("summaries").insert(payload).execute()
         return response.data[0]
+
+    def find_summary_for_report(self, report_id: str) -> dict[str, Any] | None:
+        response = self.client.table("summaries").select("id, report_id, summary_model").eq("report_id", report_id).limit(1).execute()
+        return response.data[0] if response.data else None
 
     def insert_eval_run(
         self,

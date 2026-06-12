@@ -4,7 +4,7 @@ import unittest
 from typing import Any
 from unittest.mock import patch
 
-from main import generate_and_evaluate_report_safely
+from main import evaluate_record_safely, generate_and_evaluate_report_safely
 
 
 class FakeStore:
@@ -24,6 +24,28 @@ class FakeStore:
 
 
 class DailyWorkflowTests(unittest.TestCase):
+    def test_safe_precreated_summary_eval_persists_error_and_continues(self) -> None:
+        store = FakeStore()
+        bad_record = {"report": {"id": "bad-report"}, "summary": {"id": "bad-summary", "summary_text": "bad"}}
+        good_record = {"report": {"id": "good-report"}, "summary": {"id": "good-summary", "summary_text": "good"}}
+
+        def fake_evaluate(record: dict[str, Any], _: FakeStore) -> dict[str, Any]:
+            if record["summary"]["id"] == "bad-summary":
+                raise RuntimeError("judge timed out")
+            return {"result": {"verdict": "PASS"}, "summary_id": record["summary"]["id"]}
+
+        with patch("main.evaluate_record", side_effect=fake_evaluate):
+            outputs = [
+                evaluate_record_safely(bad_record, store),
+                evaluate_record_safely(good_record, store),
+            ]
+
+        self.assertEqual(outputs[0]["result"]["verdict"], "ERROR")
+        self.assertEqual(outputs[1]["result"]["verdict"], "PASS")
+        self.assertEqual(store.eval_runs[0]["report_id"], "bad-report")
+        self.assertEqual(store.eval_runs[0]["summary_id"], "bad-summary")
+        self.assertEqual(store.eval_runs[0]["verdict"], "ERROR")
+
     def test_safe_daily_eval_persists_error_and_continues(self) -> None:
         store = FakeStore()
         bad_report = {"id": "bad-report", "ticker": "BAD"}

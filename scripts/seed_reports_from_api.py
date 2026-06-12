@@ -1,10 +1,10 @@
-"""Seed reports table from Simplize API JSON response.
+"""Seed reports and pre-created summaries from Simplize API JSON response.
 
 Usage:
     python scripts/seed_reports_from_api.py < response.json
     python scripts/seed_reports_from_api.py response.json
 
-Input shape (from Simplize API):
+Supported input shapes:
     {
         "data": {
             "reports": [
@@ -18,20 +18,32 @@ Input shape (from Simplize API):
             ]
         }
     }
+    {
+        "items": [
+            {
+                "symbol": "FRT",
+                "report_url": "https://cdn.simplize.vn/...pdf",
+                "response": [
+                    {"title": "Mở rộng chuỗi Long Châu", "content": "..."}
+                ]
+            }
+        ]
+    }
 
 Mapping:
-    ticker       -> ticker
-    issue_date   -> report_date (DD/MM/YYYY -> YYYY-MM-DD)
-    attached_link -> source_pdf_url
+    ticker/symbol              -> reports.ticker
+    issue_date/report_date      -> reports.report_date
+    attached_link/report_url    -> reports.source_pdf_url
+    summary_text/response[]     -> summaries.summary_text
 
-Upserts on source_pdf_url to be idempotent.
+Skips existing source_pdf_url to be idempotent.
 """
 
 from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime
+import argparse
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -39,38 +51,23 @@ from dotenv import load_dotenv
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from pipeline.persist import SupabaseStore
-
-
-def parse_issue_date(raw: str) -> str:
-    """Convert DD/MM/YYYY to YYYY-MM-DD."""
-    return datetime.strptime(raw.strip(), "%d/%m/%Y").strftime("%Y-%m-%d")
-
-
-def build_payload(item: dict) -> dict:
-    return {
-        "ticker": item.get("ticker") or None,
-        "report_date": parse_issue_date(item["issue_date"]) if item.get("issue_date") else None,
-        "source_pdf_url": item.get("attached_link") or None,
-        "pdf_storage_path": None,
-        "report_text": None,
-        "status": "pending",
-        "external_id": item.get("id") or None,
-        "ticker_name": item.get("ticker_name") or None,
-        "industry_name": item.get("industry_name") or None,
-        "report_type": item.get("report_type") or None,
-        "source": item.get("source") or None,
-        "title": item.get("title") or None,
-        "file_name": item.get("file_name") or None,
-        "target_price": item.get("target_price") or None,
-        "recommend": item.get("recommend") or None,
-    }
+from pipeline.import_payload import build_report_payload, extract_items, get_summary_model, get_summary_text
 
 
 def main() -> None:
     load_dotenv()
 
-    if len(sys.argv) > 1:
-        raw = Path(sys.argv[1]).read_text(encoding="utf-8")
+    parser = argparse.ArgumentParser(description="Seed reports and pre-created summaries from Simplize JSON.")
+    parser.add_argument("input", nargs="?", help="JSON file path. Reads stdin when omitted.")
+    parser.add_argument(
+        "--attach-missing-summaries",
+        action="store_true",
+        help="When a report already exists, insert its summary only if that report has no summary yet.",
+    )
+    args = parser.parse_args()
+
+    if args.input:
+        raw = Path(args.input).read_text(encoding="utf-8")
     else:
         raw = sys.stdin.read()
 
@@ -81,46 +78,77 @@ def main() -> None:
         raw = raw.strip().rstrip(",")
         data = json.loads(f"[{raw}]")
 
-    # Support: full API envelope / bare list / bare array of objects
-    if isinstance(data, list):
-        items = data
-    else:
-        items = data.get("data", {}).get("reports", [])
+    items = extract_items(data)
 
     if not items:
         print("No reports found in input.", file=sys.stderr)
         sys.exit(1)
 
     store = SupabaseStore()
-    inserted = skipped = errors = 0
+    inserted = summaries_inserted = summaries_missing = skipped = errors = 0
 
     for item in items:
-        source_pdf_url = item.get("attached_link")
+        payload = build_report_payload(item)
+        source_pdf_url = payload.get("source_pdf_url")
+        ticker = payload.get("ticker") or item.get("id") or "UNKNOWN"
+        report_date = payload.get("report_date") or "no-date"
         if not source_pdf_url:
-            print(f"  SKIP id={item.get('id')} — no attached_link")
+            print(f"  SKIP id={item.get('id')} — no source_pdf_url/report_url/attached_link")
             skipped += 1
             continue
 
         try:
             existing = store.find_existing_report(
-                ticker=item.get("ticker"),
-                report_date=parse_issue_date(item["issue_date"]) if item.get("issue_date") else None,
+                ticker=payload.get("ticker"),
+                report_date=payload.get("report_date"),
                 source_pdf_url=source_pdf_url,
             )
             if existing:
-                print(f"  EXISTS {item.get('ticker')} {item.get('issue_date')} — {source_pdf_url}")
+                summary_text = get_summary_text(item)
+                if args.attach_missing_summaries and summary_text and not store.find_summary_for_report(existing["id"]):
+                    summary_model = get_summary_model(item)
+                    store.insert_summary(
+                        {
+                            "report_id": existing["id"],
+                            "summary_text": summary_text,
+                            "summary_model": summary_model,
+                        }
+                    )
+                    print(f"  INSERT SUMMARY {ticker} {report_date} — {summary_model} (existing report)")
+                    summaries_inserted += 1
+                elif args.attach_missing_summaries and not summary_text:
+                    print(f"  SKIP SUMMARY MISSING {ticker} {report_date}")
+                    summaries_missing += 1
+                print(f"  EXISTS {ticker} {report_date} — {source_pdf_url}")
                 skipped += 1
                 continue
 
-            payload = build_payload(item)
-            store.insert_report(payload)
-            print(f"  INSERT {item.get('ticker')} {item.get('issue_date')} — {source_pdf_url}")
+            report = store.insert_report(payload)
+            print(f"  INSERT REPORT {ticker} {report_date} — {source_pdf_url}")
             inserted += 1
+            summary_text = get_summary_text(item)
+            if summary_text:
+                summary_model = get_summary_model(item)
+                store.insert_summary(
+                    {
+                        "report_id": report["id"],
+                        "summary_text": summary_text,
+                        "summary_model": summary_model,
+                    }
+                )
+                print(f"  INSERT SUMMARY {ticker} {report_date} — {summary_model}")
+                summaries_inserted += 1
+            else:
+                print(f"  SKIP SUMMARY MISSING {ticker} {report_date}")
+                summaries_missing += 1
         except Exception as exc:
             print(f"  ERROR  id={item.get('id')} — {exc}", file=sys.stderr)
             errors += 1
 
-    print(f"\nDone: {inserted} inserted, {skipped} skipped, {errors} errors")
+    print(
+        f"\nDone: {inserted} reports inserted, {summaries_inserted} summaries inserted, "
+        f"{skipped} skipped, {summaries_missing} summaries missing, {errors} errors"
+    )
 
 
 if __name__ == "__main__":
