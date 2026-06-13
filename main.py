@@ -353,7 +353,7 @@ def run_daily(x_demo_token: str | None = Header(default=None)) -> dict[str, Any]
     store = SupabaseStore()
     if store.get_state("pipeline_enabled", True) is False:
         return {"processed": 0, "status": "disabled", "message": "pipeline is disabled — POST /pipeline/enable to re-enable"}
-    records = store.fetch_unevaluated_summaries(limit=settings.daily_batch_size)
+    records = store.fetch_unevaluated_summaries(limit=settings.daily_batch_size, summary_model="precreated")
     if not records:
         return {"processed": 0, "message": "no unevaluated summaries"}
     outputs = [evaluate_record_safely(record, store) for record in records]
@@ -437,11 +437,12 @@ def import_reports(payload: ReportImportRequest, x_demo_token: str | None = Head
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
-def dashboard() -> str:
+def dashboard(source: str = "real") -> str:
     store = SupabaseStore()
-    aggregate = store.aggregate()
-    runs = store.fetch_eval_runs(limit=100)
-    return render_dashboard(aggregate, runs)
+    all_runs = store.fetch_eval_runs(limit=100)
+    runs = all_runs if source == "all" else [run for run in all_runs if (run.get("summary") or {}).get("summary_model") == "precreated"]
+    aggregate = aggregate_runs(runs)
+    return render_dashboard(aggregate, runs, data_source=source)
 
 
 ISSUE_GROUP_LABELS = {
@@ -479,6 +480,36 @@ def format_rate(value: Any) -> str:
         return f"{float(value) * 100:.0f}%"
     except (TypeError, ValueError):
         return "0%"
+
+
+def aggregate_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
+    total = len(runs)
+    verdict_counts = {"PASS": 0, "FAIL": 0, "PASS-WITH-FLAG": 0, "ERROR": 0}
+    failure_breakdown: dict[str, int] = {}
+    hallucination_count = 0
+    buy_violation_count = 0
+    for run in runs:
+        verdict = run.get("verdict", "ERROR")
+        verdict_counts[verdict] = verdict_counts.get(verdict, 0) + 1
+        for issue in (run.get("blocks") or []) + (run.get("flags") or []):
+            category = issue.get("category", "unknown")
+            failure_breakdown[category] = failure_breakdown.get(category, 0) + 1
+            if str(category).startswith(("A_", "B_")):
+                hallucination_count += 1
+            if str(category).startswith("buy_price"):
+                buy_violation_count += 1
+    return {
+        "total_evaluated": total,
+        "pass_count": verdict_counts.get("PASS", 0),
+        "fail_count": verdict_counts.get("FAIL", 0),
+        "pass_with_flag_count": verdict_counts.get("PASS-WITH-FLAG", 0),
+        "error_count": verdict_counts.get("ERROR", 0),
+        "pass_rate": verdict_counts.get("PASS", 0) / total if total else 0,
+        "hallucination_count": hallucination_count,
+        "hallucination_rate": hallucination_count / total if total else 0,
+        "buy_violation_count": buy_violation_count,
+        "failure_breakdown": failure_breakdown,
+    }
 
 
 def build_daily_trends(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -570,7 +601,7 @@ def render_bullet_breakdown(
     )
 
 
-def render_dashboard(aggregate: dict[str, Any], runs: list[dict[str, Any]]) -> str:
+def render_dashboard(aggregate: dict[str, Any], runs: list[dict[str, Any]], *, data_source: str = "real") -> str:
     group_counts: dict[str, int] = {}
     for category, count in aggregate.get("failure_breakdown", {}).items():
         group = issue_group(str(category))
@@ -620,13 +651,15 @@ def render_dashboard(aggregate: dict[str, Any], runs: list[dict[str, Any]]) -> s
         bullet_evals_detail = html.escape(json.dumps(bullet_evals_data, ensure_ascii=False, indent=2))
         bullet_breakdown_html = render_bullet_breakdown(bullet_evals_data, run.get("blocks") or [], run.get("flags") or [])
         summary_text = html.escape(str(summary.get("summary_text", "")))
+        summary_model = html.escape(str(summary.get("summary_model", "")))
         ticker = html.escape(str(report.get("ticker", "")))
         report_date = html.escape(str(report.get("report_date", "")))
         verdict = html.escape(str(run.get("verdict", "")))
         rows.append(
-            f"<tr data-verdict='{verdict}' data-ticker='{ticker.lower()}' data-date='{report_date.lower()}'>"
+            f"<tr data-verdict='{verdict}' data-ticker='{ticker.lower()}' data-date='{report_date.lower()}' data-model='{summary_model.lower()}'>"
             f"<td>{html.escape(str(run.get('created_at', '')))}</td>"
             f"<td>{ticker}</td>"
+            f"<td><code>{summary_model or 'unknown'}</code></td>"
             f"<td>{report_date}</td>"
             f"<td><span class='badge {verdict.lower()}'>{verdict}</span></td>"
             f"<td><div class='summary'>{summary_text or '<em>No summary saved</em>'}</div></td>"
@@ -670,6 +703,7 @@ def render_dashboard(aggregate: dict[str, Any], runs: list[dict[str, Any]]) -> s
 <body>
   <h1>AI Summary Eval Dashboard</h1>
   <p>Supabase-backed daily evaluation history. Full report text is intentionally hidden.</p>
+  <p><strong>Data source:</strong> {html.escape("Real precreated summaries only" if data_source != "all" else "All eval runs, including demo/mock history")} · <a href="/dashboard">Real only</a> · <a href="/dashboard?source=all">All history</a></p>
   <section class="grid">
     <div class="card"><div>Total</div><div class="metric">{aggregate["total_evaluated"]}</div></div>
     <div class="card"><div>PASS</div><div class="metric">{aggregate["pass_count"]}</div></div>
@@ -715,8 +749,8 @@ def render_dashboard(aggregate: dict[str, Any], runs: list[dict[str, Any]]) -> s
     </label>
   </section>
   <table>
-    <thead><tr><th>Time</th><th>Ticker</th><th>Report date</th><th>Verdict</th><th>Generated summary</th><th>Issues</th></tr></thead>
-    <tbody id="runsBody">{"".join(rows) or "<tr><td colspan='6'>No eval runs yet.</td></tr>"}</tbody>
+    <thead><tr><th>Time</th><th>Ticker</th><th>Summary source</th><th>Report date</th><th>Verdict</th><th>Generated summary</th><th>Issues</th></tr></thead>
+    <tbody id="runsBody">{"".join(rows) or "<tr><td colspan='7'>No eval runs yet.</td></tr>"}</tbody>
   </table>
   <script>
     const verdictFilter = document.getElementById('verdictFilter');

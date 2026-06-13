@@ -16,6 +16,7 @@ class FakeTable:
         self.data = data
         self.fail_select_count = fail_select_count
         self.selected = ""
+        self.filters: list[tuple[str, Any]] = []
         self.limit_value: int | None = None
 
     def select(self, value: str, **_: Any) -> "FakeTable":
@@ -26,6 +27,10 @@ class FakeTable:
         return self
 
     def is_(self, *_: Any) -> "FakeTable":
+        return self
+
+    def eq(self, key: str, value: Any) -> "FakeTable":
+        self.filters.append((key, value))
         return self
 
     def or_(self, *_: Any) -> "FakeTable":
@@ -103,6 +108,20 @@ class SupabaseStoreTests(unittest.TestCase):
                 }
             ],
         )
+
+    def test_fetch_unevaluated_summaries_can_filter_summary_model(self) -> None:
+        summaries_table = FakeTable([])
+        store = object.__new__(SupabaseStore)
+        store.client = FakeClient(
+            {
+                "summaries": summaries_table,
+                "reports": FakeTable([]),
+            }
+        )
+
+        SupabaseStore.fetch_unevaluated_summaries(store, limit=5, summary_model="precreated")
+
+        self.assertIn(("summary_model", "precreated"), summaries_table.filters)
 
     def test_fetch_unevaluated_summaries_fallback_filters_evaluated_summaries(self) -> None:
         store = object.__new__(SupabaseStore)

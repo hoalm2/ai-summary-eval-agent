@@ -73,7 +73,7 @@ Stores pre-created or generated summaries. One row per summary to evaluate. In t
 | Value | Condition |
 |---|---|
 | `"precreated"` | Summary was imported/seeded before eval |
-| `"qwen3-5-27b"` (or current model) | Real GreenNode run |
+| `"openai/gpt-5-mini"` (or `MODEL_SUMMARY` value) | Real GreenNode run via contest shim |
 | `"mock_llm"` | `MOCK_LLM_MODE=true` |
 | `"unexpected_error"` | Stage 2 raised an unexpected exception |
 | `"extract_failed"` / `"extract_too_short"` | Report text could not be obtained |

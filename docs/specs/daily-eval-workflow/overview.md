@@ -30,30 +30,32 @@ Manual review does not scale past one reviewer at 15–20 min/summary, and produ
 ## How It Works
 
 ```
-Supabase `reports` table
-  └─ ensure report_text (stored text, or extracted from public PDF)
+Supabase `reports` + `summaries` tables
+  └─ Stage 0: ensure report_text (DB or PDF extract)
+  └─ fetch pre-existing summary_text
         │
         ▼
-  Stage 1 — Skeleton Extraction                    [LLM: Qwen]
+  Stage 1 — Skeleton Extraction      [LLM: Gemini 3.1 Pro Preview]
   Extracts: thesis points, key risks,
   financial highlights, disclaimers
         │
         ▼
-  Stage 2 — Summary Generation                     [LLM: Qwen]
-  Produces: Vietnamese bullet summary (≤ 5 bullets)
+  Stage 1b — Citation Alignment      [LLM: Gemini 3.1 Pro Preview]
+  For each summary bullet: finds 1–3
+  verbatim quotes from report as evidence
         │
         ├──────────────────────────────────────┐
         ▼                                      ▼
-  Stage 3 — LLM Judge                         Deterministic Factcheck
-  [LLM: Gemma]                                [code: pipeline/factcheck.py]
-  Input: full report text +                   Extracts all numbers / dates
-  skeleton hint + eval checklist              from both texts; flags any
-  Output: blocks[], flags[]                   token in summary not in report;
-                                              checks upside % for timestamp
+  Stage 3b — LLM Judge               Stage 3a — Deterministic Factcheck
+  [LLM: GPT-5 Mini]                       [code: pipeline/factcheck.py]
+  Input: full report text +          Extracts all numbers / dates
+  skeleton hint + eval checklist     from both texts; flags any
+  Output: blocks[], flags[]          token in summary not in report;
+                                     checks upside % for timestamp
         │                                      │
         └──────────────┬────────────────────────┘
                        ▼
-  Merge issues → compute_verdict()
+  Stage 3c — Merge → compute_verdict()
   → PASS / PASS-WITH-FLAG / FAIL / ERROR
                        │
                        ▼
@@ -62,6 +64,8 @@ Supabase `reports` table
                        ▼
   /dashboard — aggregate metrics + per-summary detail
 ```
+
+> Stage 2 (Summary Generation, GPT-5 Mini) is a **contest shim only** — not in the main `/run-daily` flow. `/run-daily` uses pre-seeded summaries from the `summaries` table.
 
 ### Why two judging layers?
 
@@ -112,26 +116,99 @@ The design principle is **build once, swap config**: business logic is fully dec
 
 ---
 
-## Models
+## Model Selection
 
-| Stage | Model | Reason |
-|---|---|---|
-| Stage 1 — skeleton | `qwen3-5-27b` | Strongest available for Vietnamese + financial reasoning + structured JSON output |
-| Stage 2 — summary | `qwen3-5-27b` | Consistent language quality across extraction and generation |
-| Stage 3 — judge | `gemma-4-31b-it` | Sufficient for the classification task; faster and cheaper than Qwen |
-| Fallback | `MiniMax-M2.5` | Invoked if primary model times out |
+Each stage uses a model chosen for its specific requirements. Priority reflects how much a failure at that stage degrades the final eval quality.
 
-All models are called via OpenAI-compatible chat completions. Swapping providers requires only env var changes.
+| Stage | Name | Model | Reason | Fallback | Priority |
+|---|---|---|---|---|---|
+| 0 | PDF Acquisition | — (no LLM) | Pure text extraction + regex validation | — | N/A |
+| 1 | Skeleton Extraction | `gemini/gemini-3.1-pro-preview` | Largest context window; best document grounding for long Vietnamese PDFs | `qwen3-5-27b` | **HIGH** |
+| 1b | Citation Alignment | `gemini/gemini-3.1-pro-preview` | Must track verbatim quotes from report; same model as Stage 1 for context consistency | `qwen3-5-27b` | **HIGH** |
+| 2 | Summary Generation *(contest shim)* | `openai/gpt-5-mini` | Strong instruction-following; structured Vietnamese bullet output | `qwen3-5-27b` | MED |
+| 3a | Deterministic Factcheck | — (no LLM) | Pure regex/token matching — zero hallucination risk | — | N/A |
+| 3b | LLM Judge | `openai/gpt-5-mini` | Critical node — a parse error propagates to ERROR verdict for the whole record | `deepseek/deepseek-v4-pro` | **CRITICAL** |
+| 3c | Merge & Verdict | — (logic code) | `compute_verdict()` is deterministic Python — verdict never delegated to LLM | — | N/A |
+| P | Persist | — (DB write) | Supabase insert/update | — | N/A |
+
+GPT-5 models (`openai/gpt-5-mini`) route through the **Responses API** (non-streaming, `reasoning: medium`). All other LLM calls use GreenNode MaaS Chat Completions. Model swap requires only `MODEL_*` env var changes — no code changes.
 
 ---
 
-## Dashboard
+## Dashboard & HTML Report
 
-Two views in one `/dashboard` HTML endpoint — no login required:
+The `/dashboard` HTML endpoint is the primary interface for PM and stakeholders to monitor AI output quality — no login required. The report design is driven by six Jobs to Be Done (JTBDs).
 
-**Aggregate metrics:** total evaluated, PASS / FAIL / PASS-WITH-FLAG / ERROR counts, pass rate, hallucination count and rate, buy violation count, failure breakdown by issue category.
+---
 
-**Per-summary detail list:** ticker, report date, verdict badge, generated summary text, issue descriptions, expandable skeleton JSON and judge JSON. Filterable by verdict, ticker, and date.
+### Jobs to Be Done
+
+| # | JTBD | Priority | Value Delivered |
+|---|---|---|---|
+| J1 | **Safety gate** — Know immediately if any summary crossed a product rule (buy price or Type A/B hallucination) before it reaches end users | P0 | Prevents regulatory risk and user trust damage from reaching production |
+| J2 | **Daily health check** — Confirm pass rate ≥ 85% and hallucination rate ≤ 2% in one glance, without reading individual summaries | P0 | Replaces 15–20 min/summary manual review with a single threshold comparison |
+| J3 | **Root cause drill-down** — Navigate from batch → failed summary → failed bullet → source evidence to understand exactly what went wrong | P1 | Cuts root cause investigation from hours to minutes; no need to re-read source PDFs |
+| J4 | **Systemic failure detection** — Identify when one failure type clusters (> 30% of failures) and see a concrete suggested fix | P1 | Converts one-off failures into systemic prompt/workflow improvements |
+| J5 | **Trend monitoring** — See quality trend across multiple batches to support weekly stakeholder updates | P2 | Enables data-driven model/prompt upgrade decisions; catches regressions early |
+| J6 | **Demo & auditability** — Show concrete pass/fail examples with visible reasoning chains to contest judges or executives | P2 | Makes the eval system auditable and trustworthy to non-technical stakeholders |
+
+---
+
+### Design Implications
+
+Each JTBD drives a concrete constraint on the report:
+
+- **J1 → Safety violations appear above the fold.** Buy price issues and Type A/B hallucinations must live in a persistent banner — never buried in a scrollable list. Banner collapses to a green bar when the batch is clean.
+- **J2 → Show threshold gap, not just a number.** Pass rate must show current value vs. the 85% target with a clear color signal. Same for hallucination rate vs. 2% and creation success vs. 98%.
+- **J3 → Three-level navigation is required.** Batch → summary → bullet. Stage 1b (citation alignment) provides the per-bullet evidence citations that make drill-down possible. Without Stage 1b, drill-down stops at the summary level.
+- **J4 → Failure frequency ranking is automatic.** The report computes and ranks failure types — PM should never have to count issue types manually. When one type exceeds 30%, the report flags it visually and shows a specific suggested fix for the responsible prompt or workflow step.
+- **J5 → Multi-batch sparkline is required.** A single batch provides no direction signal. Minimum 7 batches of pass rate history for the trend line to be meaningful.
+- **J6 → Judge reasoning must be readable inline.** The `rationale` field from the LLM judge and `explanation` from the deterministic factcheck must be visible without opening a separate modal. Skeleton JSON and bullet citations are expandable in place.
+
+---
+
+### Report Structure
+
+Six sections in priority order — higher sections are always visible without scrolling:
+
+#### Section 1 — Safety Alert Banner *(J1)*
+
+Red banner if any eval run in the batch contains `buy_price_*`, `A_*`, or `B_*` BLOCK issues. Shows count, affected tickers, and issue category names. Collapses to a green "No safety violations" bar when the batch is clean.
+
+#### Section 2 — Quality Threshold Dashboard *(J2)*
+
+Four metric cards, each showing current value vs. target threshold with color coding:
+
+| Metric | Target | Source |
+|---|---|---|
+| Pass rate | ≥ 85% | eval_runs.verdict counts |
+| Hallucination rate | ≤ 2% | runs with any A_* or B_* block ÷ total |
+| Buy violations | 0 | runs with any buy_price_* block |
+| Creation success rate | ≥ 98% | (total − ERROR) ÷ total |
+
+#### Section 3 — Failure Pattern Analysis *(J4)*
+
+Top failure types ranked by frequency this batch. For each type:
+- Count and % of total failures
+- Visual flag if > 30% of failures (indicates systemic issue requiring prompt fix)
+- Suggested fix: specific prompt file or workflow step responsible, with a concrete change recommendation
+
+#### Section 4 — Latest Eval Runs *(J3)*
+
+Filterable list (by verdict, ticker, date range). Each row shows:
+- Verdict badge (PASS / PASS-WITH-FLAG / FAIL / ERROR)
+- Ticker + report date
+- Expandable issue list: per-bullet breakdown with issue category, summary quote, source evidence citation from Stage 1b
+
+#### Section 5 — Historical Trend *(J5)*
+
+Pass rate sparkline over last N batches. Shows 7-batch moving average and flags any batch below the 85% threshold.
+
+#### Section 6 — Walk-through Examples *(J6)*
+
+One PASS and one FAIL example with all reasoning expanded: skeleton JSON, per-bullet evidence citations, LLM judge rationale, deterministic factcheck findings. Intended for contest demo and stakeholder audit.
+
+---
 
 Full `report_text` is never exposed in any endpoint.
 
@@ -141,10 +218,11 @@ Full `report_text` is never exposed in any endpoint.
 
 | Stage | Model | Estimated tokens |
 |---|---|---|
-| Stage 1 — skeleton | Qwen | ~3,000 (long PDF input, medium JSON output) |
-| Stage 2 — summary | Qwen | ~1,500 (short output) |
-| Stage 3 — judge | Gemma | ~2,000 (summary + skeleton + checklist) |
-| **Total per report** | | **~6,500** |
+| Stage 1 — skeleton | Gemini 3.1 Pro Preview | ~4,600 (long PDF input + JSON output) |
+| Stage 1b — alignment | Gemini 3.1 Pro Preview | ~5,000 (report + summary → bullet citations) |
+| Stage 3b — judge | GPT-5 Mini | ~5,700 (report + skeleton + checklist) |
+| Stage 2 — summary *(contest shim)* | GPT-5 Mini | ~4,400 (not in main flow) |
+| **Total per record (main flow)** | | **~15,300** |
 
 ### QC strategy — do not burn tokens before validation
 

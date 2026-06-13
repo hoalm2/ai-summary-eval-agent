@@ -54,35 +54,33 @@ class SupabaseStore:
         )
         return self._attach_reports(summaries)
 
-    def fetch_unevaluated_summaries(self, *, limit: int = 5) -> list[dict[str, Any]]:
+    def fetch_unevaluated_summaries(self, *, limit: int = 5, summary_model: str | None = None) -> list[dict[str, Any]]:
         try:
-            summaries = (
+            query = (
                 self.client.table("summaries")
                 .select("id, report_id, summary_text, summary_model, created_at, eval_runs!left(id)")
                 .is_("eval_runs.id", "null")
-                .order("created_at")
-                .limit(limit)
-                .execute()
-                .data
-                or []
             )
+            if summary_model:
+                query = query.eq("summary_model", summary_model)
+            summaries = query.order("created_at").limit(limit).execute().data or []
             clean_summaries = [{key: value for key, value in summary.items() if key != "eval_runs"} for summary in summaries]
             return self._attach_reports(clean_summaries)
         except Exception:
-            return self._fetch_unevaluated_summaries_fallback(limit=limit)
+            return self._fetch_unevaluated_summaries_fallback(limit=limit, summary_model=summary_model)
 
-    def _fetch_unevaluated_summaries_fallback(self, *, limit: int = 5) -> list[dict[str, Any]]:
+    def _fetch_unevaluated_summaries_fallback(self, *, limit: int = 5, summary_model: str | None = None) -> list[dict[str, Any]]:
         eval_runs = self.client.table("eval_runs").select("summary_id").execute().data or []
         evaluated_summary_ids = {item["summary_id"] for item in eval_runs if item.get("summary_id")}
-        summaries = (
+        query = (
             self.client.table("summaries")
             .select("id, report_id, summary_text, summary_model, created_at")
             .order("created_at")
             .limit(200)
-            .execute()
-            .data
-            or []
         )
+        if summary_model:
+            query = query.eq("summary_model", summary_model)
+        summaries = query.execute().data or []
         unevaluated = [summary for summary in summaries if summary.get("id") not in evaluated_summary_ids][:limit]
         return self._attach_reports(unevaluated)
 

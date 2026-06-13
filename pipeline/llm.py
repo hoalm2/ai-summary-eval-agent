@@ -155,20 +155,24 @@ class LLMClient:
     ) -> str:
         if self.client is None:
             raise RuntimeError("LLM client is not initialized outside mock mode.")
-        stream = self.client.responses.create(
+        response = self.client.responses.create(
             model=model,
             input=[
                 {"role": "assistant", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
             max_output_tokens=max_tokens,
-            stream=True,
             reasoning={"effort": "medium"},
         )
+        output_text = getattr(response, "output_text", None)
+        if output_text:
+            return output_text
         chunks: list[str] = []
-        for chunk in stream:
-            if getattr(chunk, "type", "") == "response.output_text.delta":
-                chunks.append(getattr(chunk, "delta", ""))
+        for item in getattr(response, "output", []) or []:
+            for content in getattr(item, "content", []) or []:
+                text = getattr(content, "text", None)
+                if text:
+                    chunks.append(text)
         return "".join(chunks)
 
     def _mock_json_response(self, *, system_prompt: str, user_prompt: str) -> str:

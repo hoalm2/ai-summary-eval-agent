@@ -12,15 +12,15 @@
 
 ## Ước tính chi phí per report
 
-Mỗi báo cáo chạy qua 4 LLM calls:
+Main flow (`/run-daily`) chạy 3 LLM calls/report (Stage 2 đã bỏ khỏi main flow):
 
-| Stage | Model | Input (tok) | Output (tok) | Subtotal (tok) |
-|---|---|---|---|---|
-| Stage 1 — skeleton | qwen3-5-27b | ~4,000 | ~600 | ~4,600 |
-| Stage 2 — summary | qwen3-5-27b | ~4,000 | ~400 | ~4,400 |
-| Stage 1b — align | qwen3-5-27b | ~4,500 | ~500 | ~5,000 |
-| Stage 3 — judge | gemma-4-31b-it | ~5,000 | ~700 | ~5,700 |
-| **Tổng/report** | | **~17,500** | **~2,200** | **~19,700 tok** |
+| Stage | Model | Input (tok) | Output (tok) | Subtotal (tok) | Ghi chú |
+|---|---|---|---|---|---|
+| Stage 1 — skeleton | gemini/gemini-3.1-pro-preview | ~4,000 | ~600 | ~4,600 | |
+| Stage 1b — align | gemini/gemini-3.1-pro-preview | ~4,500 | ~500 | ~5,000 | |
+| Stage 3b — judge | openai/gpt-5-mini | ~5,000 | ~700 | ~5,700 | Responses API |
+| **Tổng/report (main flow)** | | **~13,500** | **~1,800** | **~15,300 tok** | |
+| Stage 2 — summary *(contest shim)* | openai/gpt-5-mini | ~4,000 | ~400 | ~4,400 | Không dùng trong `/run-daily` |
 
 > ⚠️ Chưa biết tỉ lệ chính xác credit/token của GreenNode — cần verify trên portal (Billing → MaaS pricing) sau lần test đầu.
 > Mọi số ở dưới đều dùng giả định worst-case: **1 credit = 1 token**.
@@ -37,17 +37,17 @@ spike_greennode.py: 2 calls × ~200 tok = ~400 tok
 
 ---
 
-### Phase 1 — Local test: Stage 1+2+1b+3 (inline text, không fetch PDF)
+### Phase 1 — Local test: Stage 1+1b+3 (inline text, không fetch PDF)
 
-Mục tiêu: xác nhận 4 stage hoạt động đúng với GreenNode.
+Mục tiêu: xác nhận 3 stage chính hoạt động đúng với GreenNode (Gemini + GPT-5 Mini).
 
 | Test case | Endpoint | Reports | Calls | Token ước tính |
 |---|---|---|---|---|
-| Golden pass (text sạch) | `/run-one` | 3 | 12 | ~236k |
-| FAIL case (text có lỗi) | `/run-one` | 2 | 8 | ~157k |
-| **Subtotal** | | **5** | **20** | **~393k** |
+| Golden pass (text sạch) | `/run-one` | 3 | 9 | ~183k |
+| FAIL case (text có lỗi) | `/run-one` | 2 | 6 | ~122k |
+| **Subtotal** | | **5** | **15** | **~305k** |
 
-**Ước tính: ~400,000 cr**
+**Ước tính: ~305,000 cr**
 
 ---
 
@@ -57,11 +57,11 @@ Mục tiêu: xác nhận fetch PDF từ `cdn.simplize.vn` hoạt động và tex
 
 | Test case | Endpoint | Reports | Calls | Token ước tính |
 |---|---|---|---|---|
-| Test 1 PDF cụ thể | `/run-one` + `pdf_path_or_url` | 2 | 8 | ~157k |
-| Full pipeline batch nhỏ | `/run-daily` (batch=5) | 5 | 20 | ~394k |
-| **Subtotal** | | **7** | **28** | **~551k** |
+| Test 1 PDF cụ thể | `/run-one` + `pdf_path_or_url` | 2 | 6 | ~122k |
+| Full pipeline batch nhỏ | `/run-daily` (batch=5) | 5 | 15 | ~305k |
+| **Subtotal** | | **7** | **21** | **~427k** |
 
-**Ước tính: ~600,000 cr**
+**Ước tính: ~430,000 cr**
 
 ---
 
@@ -72,11 +72,11 @@ Mục tiêu: smoke test sau deploy, xác nhận endpoint prod hoạt động.
 | Test case | Reports | Calls | Token ước tính |
 |---|---|---|---|
 | Health + status check | 0 | 0 | 0 |
-| Smoke test /run-one | 2 | 8 | ~157k |
-| Batch prod đầu tiên | 5 | 20 | ~394k |
-| **Subtotal** | **7** | **28** | **~551k** |
+| Smoke test /run-one | 2 | 6 | ~122k |
+| Batch prod đầu tiên | 5 | 15 | ~305k |
+| **Subtotal** | **7** | **21** | **~427k** |
 
-**Ước tính: ~600,000 cr**
+**Ước tính: ~430,000 cr**
 
 ---
 
@@ -85,12 +85,12 @@ Mục tiêu: smoke test sau deploy, xác nhận endpoint prod hoạt động.
 | | Số lượng | Token ước tính |
 |---|---|---|
 | Reports | 75 | |
-| LLM calls | 300 | |
-| Tokens | | ~1,477,500 |
-| Buffer retry/lỗi (~20%) | | ~295,500 |
-| **Subtotal** | | **~1,773,000** |
+| LLM calls | 225 (3 calls/report) | |
+| Tokens | | ~1,147,500 |
+| Buffer retry/lỗi (~20%) | | ~229,500 |
+| **Subtotal** | | **~1,377,000** |
 
-**Ước tính: ~1,800,000 cr**
+**Ước tính: ~1,380,000 cr**
 
 ---
 
@@ -99,15 +99,15 @@ Mục tiêu: smoke test sau deploy, xác nhận endpoint prod hoạt động.
 | Phase | Credit ước tính |
 |---|---|
 | Phase 0 — Connectivity spike | ~1,000 |
-| Phase 1 — Local stage test | ~400,000 |
-| Phase 2 — Local PDF + full pipeline | ~600,000 |
-| Phase 3 — Deploy + verify prod | ~600,000 |
-| Phase 4 — Production 15 ngày | ~1,800,000 |
-| **Tổng** | **~3,401,000** |
+| Phase 1 — Local stage test | ~305,000 |
+| Phase 2 — Local PDF + full pipeline | ~430,000 |
+| Phase 3 — Deploy + verify prod | ~430,000 |
+| Phase 4 — Production 15 ngày | ~1,380,000 |
+| **Tổng** | **~2,546,000** |
 | **MaaS có sẵn** | **5,000,000** |
-| **Dư** | **~1,599,000** |
+| **Dư** | **~2,454,000** |
 
-→ Đủ để chạy toàn bộ kế hoạch, còn ~1.6M dự phòng.
+→ Đủ để chạy toàn bộ kế hoạch, còn ~2.45M dự phòng (tăng từ 1.6M nhờ bỏ Stage 2 khỏi main flow).
 → Chỉ cần nạp thêm từ ví tổng sang MaaS **nếu** giá thực tế tệ hơn ước tính (unlikely).
 
 ---

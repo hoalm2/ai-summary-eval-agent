@@ -18,23 +18,27 @@
 
 ## LLM Providers And Models
 
-- **API shape:** OpenAI-compatible chat completions.
 - **Contest provider:** GreenNode MaaS.
-- **Stage 2a skeleton model:** `qwen3-5-27b`.
-- **Stage 2b summary model:** `qwen3-5-27b`.
-- **Stage 3 judge model:** `gemma-4-31b-it`.
-- **Fallback model:** `MiniMax-M2.5`.
-- **Future production provider:** Anthropic Claude API by config swap, without changing business logic.
+- **Stage 1 skeleton model:** `gemini/gemini-3.1-pro-preview` (`MODEL_SKELETON`).
+- **Stage 1b alignment model:** `gemini/gemini-3.1-pro-preview` (`MODEL_ALIGN`, defaults to `MODEL_SKELETON`).
+- **Stage 2 summary model** *(contest shim)*: `openai/gpt-5-mini` (`MODEL_SUMMARY`).
+- **Stage 3b judge model:** `openai/gpt-5-mini` (`MODEL_JUDGE`).
+- **Fallback model:** `deepseek/deepseek-v4-pro` (`MODEL_FALLBACK`).
+- **API routing:** GPT-5 models use the **Responses API** (`client.responses.create`, non-streaming). All other models use Chat Completions.
+- **Future production provider:** config swap to Anthropic Claude API — no business logic changes.
 
 ## Pipeline Stages
 
-1. **Input / extract text:** use stored `report_text` or extract from allowed public PDF source.
-2. **Stage 2b summary generation:** generate Vietnamese bullet summary from full report text.
-3. **Stage 2a skeleton extraction:** extract auditable thesis, risks, disclaimers, and financial highlights.
-4. **Stage 3 judge:** compare summary against full report, skeleton hint, and eval checklist.
-5. **Deterministic factcheck:** code-level checks for numeric/date/upside violations.
-6. **Persistence:** write summary and eval result to Supabase.
-7. **Dashboard:** serve aggregate metrics and per-summary detail from one HTML endpoint.
+1. **Stage 0 — Input / extract text:** use stored `report_text` or extract from allowed public PDF source. Fetch pre-existing `summary_text` from `summaries` table.
+2. **Stage 1 — Skeleton extraction:** extract auditable thesis, risks, disclaimers, and financial highlights.
+3. **Stage 1b — Citation alignment:** for each summary bullet, find 1–3 verbatim quotes from the report as evidence.
+4. **Stage 3a — Deterministic factcheck:** code-level checks for numeric/date/upside violations.
+5. **Stage 3b — LLM judge:** compare summary against full report, skeleton hint, and eval checklist.
+6. **Stage 3c — Merge & verdict:** deterministic `compute_verdict()` from merged issues.
+7. **Persist:** write eval result to Supabase.
+8. **Dashboard:** serve aggregate metrics and per-summary detail from one HTML endpoint.
+
+> Stage 2 (summary generation) is a contest shim kept for ad hoc use — not part of the main `/run-daily` flow.
 
 ## Configuration
 
@@ -51,6 +55,7 @@ Important optional variables:
 - `MOCK_LLM_MODE`
 - `GREENNODE_JSON_MODE`
 - `MODEL_SKELETON`
+- `MODEL_ALIGN`
 - `MODEL_SUMMARY`
 - `MODEL_JUDGE`
 - `MODEL_FALLBACK`
