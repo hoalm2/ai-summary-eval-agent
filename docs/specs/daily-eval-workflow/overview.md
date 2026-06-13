@@ -173,7 +173,7 @@ Six sections in priority order — higher sections are always visible without sc
 
 #### Section 1 — Safety Alert Banner *(J1)*
 
-Red banner if any eval run in the batch contains `buy_price_*`, `A_*`, or `B_*` BLOCK issues. Shows count, affected tickers, and issue category names. Collapses to a green "No safety violations" bar when the batch is clean.
+Red banner if any eval run in the batch contains `buy_price_*`, `A_*`, or `B_*` BLOCK issues. Shows a general risk summary only (e.g. "Batch contains safety violations — do not publish until reviewed") — does not expose specific tickers or issue category names. Collapses to a green "No safety violations" bar when the batch is clean.
 
 #### Section 2 — Quality Threshold Dashboard *(J2)*
 
