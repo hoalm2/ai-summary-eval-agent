@@ -1,13 +1,20 @@
 from __future__ import annotations
 
 import json
+import logging
+import random
 import re
+import time
 from dataclasses import dataclass
 from typing import Any
 
-from openai import APIConnectionError, APITimeoutError, OpenAI
+from openai import APIConnectionError, APITimeoutError, OpenAI, RateLimitError
 
 from config import Settings, get_settings, require_env
+
+logger = logging.getLogger(__name__)
+
+_RATE_LIMIT_RETRY_WAIT_SECONDS = 30.0
 
 
 FENCE_PATTERN = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE | re.MULTILINE)
@@ -44,6 +51,7 @@ class LLMClient:
         self,
         *,
         model: str,
+        fallback_model: str | None = None,
         system_prompt: str,
         user_prompt: str,
         max_tokens: int,
@@ -53,8 +61,9 @@ class LLMClient:
             raw = self._mock_json_response(system_prompt=system_prompt, user_prompt=user_prompt)
             return LLMResult(parsed=safe_json_parse(raw), raw=raw, parse_error=False)
 
-        raw = self._chat_once(
+        raw = self._chat_with_retry(
             model=model,
+            fallback_model=fallback_model,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             max_tokens=max_tokens,
@@ -64,8 +73,9 @@ class LLMClient:
         try:
             return LLMResult(parsed=safe_json_parse(raw), raw=raw, parse_error=False)
         except Exception:
-            retry_raw = self._chat_once(
+            retry_raw = self._chat_with_retry(
                 model=model,
+                fallback_model=fallback_model,
                 system_prompt=system_prompt,
                 user_prompt=f"{user_prompt}\n\nReturn only valid JSON, no prose.",
                 max_tokens=max_tokens,
@@ -101,6 +111,48 @@ class LLMClient:
             temperature=temperature,
             use_json_mode=False,
         )
+
+    def _chat_with_retry(
+        self,
+        *,
+        model: str,
+        fallback_model: str | None,
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int,
+        temperature: float,
+        use_json_mode: bool,
+    ) -> str:
+        """Wraps _chat_once with one 429-backoff retry then optional fallback model."""
+        models_to_try = [model]
+        if fallback_model and fallback_model != model:
+            models_to_try.append(fallback_model)
+
+        call_kwargs: dict[str, Any] = dict(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            use_json_mode=use_json_mode,
+        )
+        last_exc: Exception = RuntimeError("No models attempted")
+        for m in models_to_try:
+            try:
+                return self._chat_once(model=m, **call_kwargs)
+            except RateLimitError as exc:
+                wait = _RATE_LIMIT_RETRY_WAIT_SECONDS + random.uniform(0, 5)
+                logger.warning("429 RateLimitError on %s; waiting %.0fs then retrying", m, wait)
+                time.sleep(wait)
+                try:
+                    return self._chat_once(model=m, **call_kwargs)
+                except RateLimitError as exc2:
+                    last_exc = exc2
+                    if m != models_to_try[-1]:
+                        logger.warning("429 persists on %s; trying fallback model", m)
+                    else:
+                        logger.error("429 persists on fallback %s; all models exhausted", m)
+
+        raise last_exc
 
     def _chat_once(
         self,

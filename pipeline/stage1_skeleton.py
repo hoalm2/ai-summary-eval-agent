@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+from openai import RateLimitError
 
 from config import Settings, get_settings
 from pipeline.llm import LLMClient, read_prompt
+
+logger = logging.getLogger(__name__)
 
 
 PROMPT_PATH = "prompts/skeleton_extraction.md"
@@ -30,11 +35,16 @@ Report date: {report_date or ""}
 {report_text}
 </REPORT>
 """
-    result = llm_client.json_chat(
-        model=settings.model_skeleton,
-        system_prompt=system_prompt,
-        user_prompt=user_prompt,
-        max_tokens=settings.skeleton_max_tokens,
-    )
-    return result.parsed
+    try:
+        result = llm_client.json_chat(
+            model=settings.model_skeleton,
+            fallback_model=settings.model_fallback,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            max_tokens=settings.skeleton_max_tokens,
+        )
+        return result.parsed
+    except RateLimitError:
+        logger.warning("Skeleton extraction rate-limited on all models; bypassing stage — returning empty skeleton")
+        return {}
 

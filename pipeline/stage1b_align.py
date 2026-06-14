@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+from openai import RateLimitError
 
 from config import Settings, get_settings
 from pipeline.llm import LLMClient, read_prompt
+
+logger = logging.getLogger(__name__)
 
 
 PROMPT_PATH = "prompts/bullet_alignment.md"
@@ -36,12 +41,17 @@ def align_bullets(
 {summary_text}
 </SUMMARY>
 """
-    result = llm_client.json_chat(
-        model=settings.model_align,
-        system_prompt=system_prompt,
-        user_prompt=user_prompt,
-        max_tokens=settings.skeleton_max_tokens,
-    )
+    try:
+        result = llm_client.json_chat(
+            model=settings.model_align,
+            fallback_model=settings.model_fallback,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            max_tokens=settings.skeleton_max_tokens,
+        )
+    except RateLimitError:
+        logger.warning("Citation alignment rate-limited on all models; bypassing stage — returning empty citations")
+        return []
     if result.parse_error:
         return []
     parsed = result.parsed
