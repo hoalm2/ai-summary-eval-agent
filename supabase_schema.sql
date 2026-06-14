@@ -5,9 +5,10 @@ create table if not exists reports (
   ticker text,
   report_date text,
   source_pdf_url text,
-  pdf_storage_path text,
   report_text text,
   status text not null default 'pending',
+  source text,
+  target_price text,
   created_at timestamptz not null default now()
 );
 

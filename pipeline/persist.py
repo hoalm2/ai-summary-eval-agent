@@ -88,7 +88,7 @@ class SupabaseStore:
         try:
             reports = (
                 self.client.table("reports")
-                .select("id, ticker, report_date, source_pdf_url, pdf_storage_path, report_text, status, created_at, eval_runs!left(id)")
+                .select("id, ticker, report_date, source_pdf_url, report_text, status, created_at, eval_runs!left(id)")
                 .is_("eval_runs.id", "null")
                 .or_("report_text.not.is.null,source_pdf_url.not.is.null")
                 .order("created_at")
@@ -106,7 +106,7 @@ class SupabaseStore:
         evaluated_report_ids = {item["report_id"] for item in eval_runs if item.get("report_id")}
         reports = (
             self.client.table("reports")
-            .select("id, ticker, report_date, source_pdf_url, pdf_storage_path, report_text, status, created_at")
+            .select("id, ticker, report_date, source_pdf_url, report_text, status, created_at")
             .order("created_at")
             .limit(200)
             .execute()
@@ -125,7 +125,7 @@ class SupabaseStore:
             return []
         reports = (
             self.client.table("reports")
-            .select("id, ticker, report_date, source_pdf_url, pdf_storage_path, report_text, status, created_at")
+            .select("id, ticker, report_date, source_pdf_url, report_text, status, created_at")
             .in_("id", report_ids)
             .execute()
             .data
