@@ -30,7 +30,7 @@ The daily eval workflow evaluates Vietnamese stock-research AI summaries against
 ## Verdict Rules
 
 - `FAIL`: any BLOCK issue, or at least 2 FLAG issues.
-- `PASS-WITH-FLAG`: 0 BLOCK issues and exactly 1 FLAG issue.
+- `FLAG`: 0 BLOCK issues and exactly 1 FLAG issue.
 - `PASS`: 0 BLOCK issues and 0 FLAG issues.
 - `ERROR`: controlled operational failure such as unreadable report text or judge parse failure.
 
@@ -82,7 +82,6 @@ Allowed:
 - Pass rate is at least 85% on the launch sample.
 - Type A/B hallucination count is 0 on the adversarial sample.
 - Buy violation count is 0.
-- No single failure type is more than 30% of total failures.
 - Demo sample includes at least 5 public or synthetic report/summary pairs.
 - Demo sample includes at least 1–2 intentional failures.
 

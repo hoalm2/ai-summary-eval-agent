@@ -55,19 +55,7 @@ class SupabaseStore:
         return self._attach_reports(summaries)
 
     def fetch_unevaluated_summaries(self, *, limit: int = 5, summary_model: str | None = None) -> list[dict[str, Any]]:
-        try:
-            query = (
-                self.client.table("summaries")
-                .select("id, report_id, summary_text, summary_model, created_at, eval_runs!left(id)")
-                .is_("eval_runs.id", "null")
-            )
-            if summary_model:
-                query = query.eq("summary_model", summary_model)
-            summaries = query.order("created_at").limit(limit).execute().data or []
-            clean_summaries = [{key: value for key, value in summary.items() if key != "eval_runs"} for summary in summaries]
-            return self._attach_reports(clean_summaries)
-        except Exception:
-            return self._fetch_unevaluated_summaries_fallback(limit=limit, summary_model=summary_model)
+        return self._fetch_unevaluated_summaries_fallback(limit=limit, summary_model=summary_model)
 
     def _fetch_unevaluated_summaries_fallback(self, *, limit: int = 5, summary_model: str | None = None) -> list[dict[str, Any]]:
         eval_runs = self.client.table("eval_runs").select("summary_id").execute().data or []
@@ -239,25 +227,30 @@ class SupabaseStore:
     def aggregate(self) -> dict[str, Any]:
         runs = self.fetch_eval_runs(limit=1000)
         total = len(runs)
-        verdict_counts = {"PASS": 0, "FAIL": 0, "PASS-WITH-FLAG": 0, "ERROR": 0}
+        verdict_counts = {"PASS": 0, "FAIL": 0, "FLAG": 0, "ERROR": 0}
         failure_breakdown: dict[str, int] = {}
         hallucination_count = 0
         buy_violation_count = 0
         for run in runs:
             verdict = run.get("verdict", "ERROR")
             verdict_counts[verdict] = verdict_counts.get(verdict, 0) + 1
-            for issue in (run.get("blocks") or []) + (run.get("flags") or []):
+            all_issues = (run.get("blocks") or []) + (run.get("flags") or [])
+            for issue in all_issues:
                 category = issue.get("category", "unknown")
                 failure_breakdown[category] = failure_breakdown.get(category, 0) + 1
-                if category.startswith(("A_", "B_")):
-                    hallucination_count += 1
                 if category.startswith("buy_price"):
                     buy_violation_count += 1
+            if any(
+                str(i.get("category", "")).startswith(("A_", "B_"))
+                and str(i.get("category", "")) != "B_tone_escalation"
+                for i in all_issues
+            ):
+                hallucination_count += 1
         return {
             "total_evaluated": total,
             "pass_count": verdict_counts.get("PASS", 0),
             "fail_count": verdict_counts.get("FAIL", 0),
-            "pass_with_flag_count": verdict_counts.get("PASS-WITH-FLAG", 0),
+            "flag_count": verdict_counts.get("FLAG", 0),
             "error_count": verdict_counts.get("ERROR", 0),
             "pass_rate": verdict_counts.get("PASS", 0) / total if total else 0,
             "hallucination_count": hallucination_count,

@@ -9,7 +9,7 @@ Authoritative rubric for evaluating AI-generated Vietnamese stock-research summa
 | Verdict | Condition |
 |---|---|
 | `FAIL` | Any BLOCK present, **or** ≥ 2 FLAGs |
-| `PASS-WITH-FLAG` | 0 BLOCKs and exactly 1 FLAG |
+| `FLAG` | 0 BLOCKs and exactly 1 FLAG |
 | `PASS` | 0 BLOCKs and 0 FLAGs |
 | `ERROR` | Controlled operational failure — unreadable report text or judge parse failure; not a summary quality verdict |
 
@@ -154,3 +154,36 @@ A summary passes when all of the following hold:
 ## Scope of Judgment
 
 A claim is flagged only when the report explicitly contradicts it, omits it, or states the opposite — **not** because the reviewer infers it might be incomplete or misleading based on outside knowledge. Do not flag based on implications not stated in the report.
+
+---
+
+## Check Methods by Failure Mode
+
+Each failure mode is caught by one of two mechanisms — **Deterministic** (rule-based code, no LLM) or **LLM Judge** (Claude Sonnet). The two layers run independently and their findings are merged before the final verdict.
+
+| Category | Severity | Check Method | Rationale |
+|---|---|---|---|
+| `A_factual` | BLOCK | **Deterministic** | Numbers and dates can be matched exactly by regex — no semantic understanding needed. LLMs are unreliable at exhaustive token-level comparison. |
+| `buy_price_upside` | BLOCK | **Deterministic** | Upside % and timestamp presence are structural rules checkable by pattern matching, not meaning. |
+| `A_logic_causal_wrong` | BLOCK | **LLM Judge** | Requires understanding which cause the report attributes to a result vs. what the summary claims. Cannot be expressed as a rule. |
+| `A_logic_causal_fabricated` | BLOCK | **LLM Judge** | Requires detecting an invented causal link between two independent observations — inherently a reasoning task. |
+| `A_logic_temporal` | BLOCK | **LLM Judge** | Distinguishing forecast tense ("dự kiến") from completed fact tense ("đã xảy ra") requires language understanding. |
+| `B_unsupported` | BLOCK | **LLM Judge** | Detecting a claim that exists in the summary but has no basis in the report requires reading comprehension of both texts. |
+| `B_fabricated_conclusion` | BLOCK | **LLM Judge** | Requires identifying when a hypothesis or expectation has been promoted to an established fact — a semantic judgment. |
+| `B_tone_escalation` | BLOCK | **LLM Judge** | Comparing the confidence level of a qualifier ("cải thiện" vs "bứt phá") requires understanding nuance of language, not token matching. |
+| `buy_price_absolute` | BLOCK | **LLM Judge** | Entry price recommendations are often implicit or paraphrased; exact-match rules produce too many false negatives. |
+| `buy_price_timing` | BLOCK | **LLM Judge** | Timing calls ("nên mua ngay") vary in phrasing; intent detection requires understanding context. |
+| `A_truncation` | FLAG | **LLM Judge** | Requires judging whether an omitted portion of a compound claim meaningfully changes the reader's interpretation. |
+| `C_disclaimer_omission` | FLAG | **LLM Judge** | Requires identifying which risks in the report are material enough that their absence from the summary is misleading. |
+| `format` | FLAG | **LLM Judge** | Structural spec violations (bullet count, language, length) are partially rule-checkable but the judge handles them holistically. |
+| `render` | FLAG | **LLM Judge** | Rendering defects are best detected by visual/text inspection within the full summary context. |
+
+### Why both layers?
+
+| | Deterministic | LLM Judge |
+|---|---|---|
+| **Strength** | Never misses a number mismatch; zero token cost; runs in milliseconds | Catches semantic errors, tone, logic, and omissions that rules cannot express |
+| **Weakness** | Blind to meaning — cannot detect logic errors or tone shifts | May occasionally miss an exact number mismatch; costs API tokens |
+| **Role** | Safety net for hallucinated figures and prohibited upside claims | Primary evaluator for the majority of failure modes |
+
+The deterministic layer is designed to be a **strict lower bound** — if it fires, the summary fails regardless of what the LLM judge says. The LLM judge then adds coverage for everything beyond token-level matching.

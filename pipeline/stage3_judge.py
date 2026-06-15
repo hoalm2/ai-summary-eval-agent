@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
+
+from openai import RateLimitError
 
 from config import Settings, get_settings
 from pipeline.factcheck import compute_verdict, deterministic_factcheck, merge_issues
 from pipeline.llm import LLMClient, read_prompt
+
+logger = logging.getLogger(__name__)
 
 
 PROMPT_PATH = "prompts/eval_judge.md"
@@ -73,12 +78,45 @@ def judge_summary(
 {json.dumps(bullet_evals or [], ensure_ascii=False)}
 </BULLET_EVALS>
 """
-    llm_result = llm_client.json_chat(
-        model=settings.model_judge,
-        system_prompt=system_prompt,
-        user_prompt=user_prompt,
-        max_tokens=settings.judge_max_tokens,
-    )
+    llm_result = None
+    try:
+        llm_result = llm_client.json_chat(
+            model=settings.model_judge,
+            fallback_model=settings.model_fallback,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            max_tokens=settings.judge_max_tokens,
+        )
+    except RateLimitError:
+        if llm_client.anthropic_client is not None:
+            logger.warning("GreenNode judge rate-limited; falling back to Claude Sonnet via Anthropic API")
+            try:
+                llm_result = llm_client.chat_anthropic(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    max_tokens=settings.judge_max_tokens,
+                )
+            except Exception as exc:
+                logger.error("Anthropic fallback also failed: %s; using deterministic-only verdict", exc)
+        else:
+            logger.warning("LLM judge rate-limited on all models; using deterministic-only verdict")
+
+    if llm_result is None:
+        blocks = list(deterministic.blocks)
+        flags = list(deterministic.flags)
+        _enrich_issues_with_bullet_context(blocks + flags, bullet_evals or [])
+        verdict = compute_verdict(blocks, flags, parse_error=False)
+        return {
+            "verdict": verdict,
+            "block_count": len(blocks),
+            "flag_count": len(flags),
+            "blocks": blocks,
+            "flags": flags,
+            "judge_json": {"_rate_limited": True},
+            "parse_error": False,
+            "rationale": "LLM judge bypassed (all models rate-limited); deterministic checks only.",
+            "bullet_evals": bullet_evals or [],
+        }
     judge_json = llm_result.parsed
     llm_blocks = judge_json.get("blocks", []) if isinstance(judge_json, dict) else []
     llm_flags = judge_json.get("flags", []) if isinstance(judge_json, dict) else []

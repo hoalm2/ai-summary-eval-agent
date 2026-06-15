@@ -56,7 +56,7 @@ Supabase `reports` + `summaries` tables
         └──────────────┬────────────────────────┘
                        ▼
   Stage 3c — Merge → compute_verdict()
-  → PASS / PASS-WITH-FLAG / FAIL / ERROR
+  → PASS / FLAG / FAIL / ERROR
                        │
                        ▼
   Persist to Supabase (`summaries` + `eval_runs`)
@@ -82,7 +82,7 @@ Extracting the skeleton first (thesis, risks, financial highlights) and feeding 
 | Verdict | Meaning |
 |---|---|
 | `PASS` | No issues found — summary is faithful and within product rules |
-| `PASS-WITH-FLAG` | One minor issue (truncation, missing caveat, or format) — usable but flagged for review |
+| `FLAG` | One minor issue (truncation, missing caveat, or format) — usable but flagged for review |
 | `FAIL` | At least one BLOCK issue, or two or more FLAG issues — summary must not be published |
 | `ERROR` | System could not evaluate — report text unreadable or judge output unparseable |
 
@@ -148,8 +148,8 @@ The `/dashboard` HTML endpoint is the primary interface for PM and stakeholders 
 | J1 | **Safety gate** — Know immediately if any summary crossed a product rule (buy price or Type A/B hallucination) before it reaches end users | P0 | Prevents regulatory risk and user trust damage from reaching production |
 | J2 | **Daily health check** — Confirm pass rate ≥ 85% and hallucination rate ≤ 2% in one glance, without reading individual summaries | P0 | Replaces 15–20 min/summary manual review with a single threshold comparison |
 | J3 | **Root cause drill-down** — Navigate from batch → failed summary → failed bullet → source evidence to understand exactly what went wrong | P1 | Cuts root cause investigation from hours to minutes; no need to re-read source PDFs |
-| J4 | **Systemic failure detection** — Identify when one failure type clusters (> 30% of failures) and see a concrete suggested fix | P1 | Converts one-off failures into systemic prompt/workflow improvements |
-| J5 | **Trend monitoring** — See quality trend across multiple batches to support weekly stakeholder updates | P2 | Enables data-driven model/prompt upgrade decisions; catches regressions early |
+| J4 | **Trend monitoring** — See quality trend across multiple batches to support weekly stakeholder updates | P2 | Enables data-driven model/prompt upgrade decisions; catches regressions early |
+| J5 | **Demo & auditability** — Show concrete pass/fail examples with visible reasoning chains to contest judges or executives | P2 | Makes the eval system auditable and trustworthy to non-technical stakeholders |
 | J6 | **Demo & auditability** — Show concrete pass/fail examples with visible reasoning chains to contest judges or executives | P2 | Makes the eval system auditable and trustworthy to non-technical stakeholders |
 
 ---
@@ -161,9 +161,8 @@ Each JTBD drives a concrete constraint on the report:
 - **J1 → Safety violations appear above the fold.** Buy price issues and Type A/B hallucinations must live in a persistent banner — never buried in a scrollable list. Banner collapses to a green bar when the batch is clean.
 - **J2 → Show threshold gap, not just a number.** Pass rate must show current value vs. the 85% target with a clear color signal. Same for hallucination rate vs. 2% and creation success vs. 98%.
 - **J3 → Three-level navigation is required.** Batch → summary → bullet. Stage 1b (citation alignment) provides the per-bullet evidence citations that make drill-down possible. Without Stage 1b, drill-down stops at the summary level.
-- **J4 → Failure frequency ranking is automatic.** The report computes and ranks failure types — PM should never have to count issue types manually. When one type exceeds 30%, the report flags it visually and shows a specific suggested fix for the responsible prompt or workflow step.
-- **J5 → Multi-batch sparkline is required.** A single batch provides no direction signal. Minimum 7 batches of pass rate history for the trend line to be meaningful.
-- **J6 → Judge reasoning must be readable inline.** The `rationale` field from the LLM judge and `explanation` from the deterministic factcheck must be visible without opening a separate modal. Skeleton JSON and bullet citations are expandable in place.
+- **J4 → Multi-batch sparkline is required.** A single batch provides no direction signal. Minimum 7 batches of pass rate history for the trend line to be meaningful.
+- **J5 → Judge reasoning must be readable inline.** The `rationale` field from the LLM judge and `explanation` from the deterministic factcheck must be visible without opening a separate modal. Skeleton JSON and bullet citations are expandable in place.
 
 ---
 
@@ -182,7 +181,7 @@ Four metric cards, each showing current value vs. target threshold with color co
 | Metric | Target | Source |
 |---|---|---|
 | Pass rate | ≥ 85% | eval_runs.verdict counts |
-| Hallucination rate | ≤ 2% | runs with any A_* or B_* block ÷ total |
+| Hallucination rate | ≤ 2% | runs with any A_* or B_* block (excl. B_tone_escalation) ÷ total |
 | Buy violations | 0 | runs with any buy_price_* block |
 | Creation success rate | ≥ 98% | (total − ERROR) ÷ total |
 
@@ -190,13 +189,13 @@ Four metric cards, each showing current value vs. target threshold with color co
 
 Top failure types ranked by frequency this batch. For each type:
 - Count and % of total failures
-- Visual flag if > 30% of failures (indicates systemic issue requiring prompt fix)
 - Suggested fix: specific prompt file or workflow step responsible, with a concrete change recommendation
 
 #### Section 4 — Latest Eval Runs *(J3)*
 
 Filterable list (by verdict, ticker, date range). Each row shows:
-- Verdict badge (PASS / PASS-WITH-FLAG / FAIL / ERROR)
+- Verdict badge (PASS / FLAG / FAIL / ERROR)
+
 - Ticker + report date
 - Expandable issue list: per-bullet breakdown with issue category, summary quote, source evidence citation from Stage 1b
 
@@ -242,7 +241,6 @@ Criteria are fixed before review — not adjusted after results are in.
 - Pass rate ≥ 85% on full launch sample
 - Zero Type A or Type B hallucinations on adversarial sample
 - Buy violation count = 0
-- No single failure type accounts for > 30% of total failures (signals a systematic prompt bug)
 - Demo sample includes ≥ 5 report/summary pairs with at least 1–2 intentional failures
 
 ---

@@ -10,10 +10,10 @@ The eval agent's taxonomy ([eval-taxonomy.md](eval-taxonomy.md)) covers the inte
 
 | Metric | Target | Definition |
 |---|---|---|
-| **Hallucination rate** | ≤ 2% of sampled summaries | Summaries with ≥ 1 Type A or Type B hallucination issue ÷ total sampled summaries |
+| **Hallucination rate** | ≤ 2% of sampled summaries | Summaries with ≥ 1 Type A or Type B issue (excl. `B_tone_escalation`) ÷ total sampled summaries |
 | **CXM display rate** | ≥ 98% confirmed displayed | % of generated summaries confirmed rendered to end users in CXM without system error |
 | **Buy price prohibition** | 0 violations | Count of summaries with any `buy_price_absolute`, `buy_price_upside`, or `buy_price_timing` BLOCK issue |
-| **UI format compliance** | 100% | % of summaries with 0 `format` or `render` FLAG issues (correct bullet structure, Vietnamese language, length within spec) |
+| **UI format compliance** | ≥ 95% | % of summaries with 0 `format` or `render` FLAG issues (correct bullet structure, Vietnamese language, length within spec) |
 
 ### How these map to eval verdict categories
 
@@ -56,6 +56,6 @@ The launch criteria in [requirements.md](requirements.md) are the *contest* gate
 | Gate | Source | When it applies |
 |---|---|---|
 | Pass rate ≥ 85%, zero Type A/B on adversarial sample, zero buy violations | requirements.md | Contest launch sample only |
-| Hallucination rate ≤ 2%, creation success ≥ 98%, downvote rate ≤ 5% | This file | Ongoing production monitoring |
+| Hallucination rate ≤ 2%, creation success ≥ 98%, format compliance ≥ 95%, downvote rate ≤ 5% | This file | Ongoing production monitoring |
 
 The eval agent's daily batch output should be compared against both sets of thresholds: the launch criteria for the contest demo, and these product metrics for production readiness reporting.

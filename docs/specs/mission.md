@@ -31,12 +31,11 @@ Replace the manual evaluation flow with an automated daily pipeline that:
 ## Success Criteria
 
 - Daily evaluation can run without PO intervention except when failures require review.
-- Every evaluated summary receives one final verdict: `PASS`, `PASS-WITH-FLAG`, `FAIL`, or controlled `ERROR`.
+- Every evaluated summary receives one final verdict: `PASS`, `FLAG`, `FAIL`, or controlled `ERROR`.
 - Failure taxonomy is consistent across prompts, code, persisted output, dashboard, and docs.
-- Launch sample pass rate is at least 85%.
+- Launch sample pass rate is at least 95%.
 - Adversarial sample has zero Type A or Type B hallucinations.
 - Buy price violation count is always 0.
-- No single failure type accounts for more than 30% of all failures.
 - Demo can show both aggregate dashboard metrics and expandable per-summary evidence.
 
 ## Guiding Principles

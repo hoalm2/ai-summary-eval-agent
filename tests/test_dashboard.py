@@ -44,7 +44,7 @@ class DashboardTests(unittest.TestCase):
                 "total_evaluated": 2,
                 "pass_count": 1,
                 "fail_count": 1,
-                "pass_with_flag_count": 0,
+                "flag_count": 0,
                 "error_count": 0,
                 "pass_rate": 0.5,
                 "hallucination_count": 1,
@@ -76,8 +76,8 @@ class DashboardTests(unittest.TestCase):
             ],
         )
 
-        self.assertIn("Daily trend", html)
-        self.assertIn("Judge taxonomy groups", html)
+        self.assertIn("Pass rate trend", html)
+        self.assertIn("Failure patterns", html)
         self.assertIn("Type A — factual/logic hallucination", html)
         self.assertIn("BUY — buy price violation", html)
         self.assertIn("50%", html)

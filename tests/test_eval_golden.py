@@ -36,7 +36,7 @@ class FakeJudgeClient:
 class EvalGoldenTests(unittest.TestCase):
     def test_compute_verdict_rules(self) -> None:
         self.assertEqual(compute_verdict([], []), "PASS")
-        self.assertEqual(compute_verdict([], [{"category": "format"}]), "PASS-WITH-FLAG")
+        self.assertEqual(compute_verdict([], [{"category": "format"}]), "FLAG")
         self.assertEqual(compute_verdict([], [{"category": "format"}, {"category": "render"}]), "FAIL")
         self.assertEqual(compute_verdict([{"category": "A_factual"}], []), "FAIL")
         self.assertEqual(compute_verdict([], [], parse_error=True), "ERROR")

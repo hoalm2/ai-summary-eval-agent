@@ -8,13 +8,15 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+import anthropic as _anthropic_sdk
+
 from openai import APIConnectionError, APITimeoutError, OpenAI, RateLimitError
 
 from config import Settings, get_settings, require_env
 
 logger = logging.getLogger(__name__)
 
-_RATE_LIMIT_RETRY_WAIT_SECONDS = 30.0
+_RATE_LIMIT_RETRY_WAIT_SECONDS = 65.0
 
 
 FENCE_PATTERN = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE | re.MULTILINE)
@@ -40,12 +42,19 @@ class LLMClient:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
         self.client: OpenAI | None = None
+        self.anthropic_client: _anthropic_sdk.Anthropic | None = None
         if not self.settings.mock_llm_mode:
             self.client = OpenAI(
                 base_url=self.settings.greennode_base_url,
                 api_key=require_env("GREENNODE_API_KEY", self.settings.greennode_api_key),
                 timeout=self.settings.request_timeout_seconds,
             )
+            if self.settings.anthropic_api_key:
+                self.anthropic_client = _anthropic_sdk.Anthropic(api_key=self.settings.anthropic_api_key)
+
+    @staticmethod
+    def _is_anthropic_model(model: str) -> bool:
+        return model.startswith("claude-")
 
     def json_chat(
         self,
@@ -60,6 +69,9 @@ class LLMClient:
         if self.settings.mock_llm_mode:
             raw = self._mock_json_response(system_prompt=system_prompt, user_prompt=user_prompt)
             return LLMResult(parsed=safe_json_parse(raw), raw=raw, parse_error=False)
+
+        if self._is_anthropic_model(model):
+            return self.chat_anthropic(model=model, system_prompt=system_prompt, user_prompt=user_prompt, max_tokens=max_tokens)
 
         raw = self._chat_with_retry(
             model=model,
@@ -227,6 +239,40 @@ class LLMClient:
                     chunks.append(text)
         return "".join(chunks)
 
+    def chat_anthropic(
+        self,
+        *,
+        model: str = "claude-sonnet-4-6",
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int,
+    ) -> LLMResult:
+        """Call Anthropic API directly (used as final fallback when GreenNode is rate-limited)."""
+        if self.anthropic_client is None:
+            raise RuntimeError("Anthropic client not initialised — set ANTHROPIC_API_KEY in .env")
+        message = self.anthropic_client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        raw = message.content[0].text if message.content else ""
+        try:
+            return LLMResult(parsed=safe_json_parse(raw), raw=raw, parse_error=False)
+        except Exception:
+            retry_prompt = f"{user_prompt}\n\nReturn only valid JSON, no prose."
+            retry_msg = self.anthropic_client.messages.create(
+                model=model,
+                max_tokens=max_tokens,
+                system=system_prompt,
+                messages=[{"role": "user", "content": retry_prompt}],
+            )
+            retry_raw = retry_msg.content[0].text if retry_msg.content else ""
+            try:
+                return LLMResult(parsed=safe_json_parse(retry_raw), raw=retry_raw, parse_error=False)
+            except Exception:
+                return LLMResult(parsed={"_parse_error": True, "raw": retry_raw}, raw=retry_raw, parse_error=True)
+
     def _mock_json_response(self, *, system_prompt: str, user_prompt: str) -> str:
         if "align each bullet" in system_prompt.lower():
             return json.dumps(
@@ -309,7 +355,7 @@ class LLMClient:
                     "explanation": "Mock judge phát hiện omission disclaimer.",
                 }
             )
-        verdict = "FAIL" if blocks or len(flags) >= 2 else "PASS-WITH-FLAG" if flags else "PASS"
+        verdict = "FAIL" if blocks or len(flags) >= 2 else "FLAG" if flags else "PASS"
         return json.dumps(
             {
                 "verdict": verdict,

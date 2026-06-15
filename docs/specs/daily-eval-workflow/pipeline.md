@@ -332,7 +332,7 @@ Each issue object has these fields:
 ```python
 if parse_error:        return "ERROR"
 if blocks or flags≥2:  return "FAIL"
-if flags == 1:         return "PASS-WITH-FLAG"
+if flags == 1:         return "FLAG"
 return "PASS"
 ```
 

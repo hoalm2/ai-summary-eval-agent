@@ -69,7 +69,7 @@ Allowed — do not block: absolute 12-month target price copied from the report;
 Return every issue found. Do not stop at the first failure.
 
 - FAIL if block_count >= 1 OR flag_count >= 2.
-- PASS-WITH-FLAG if block_count == 0 AND flag_count == 1.
+- FLAG if block_count == 0 AND flag_count == 1.
 - PASS if block_count == 0 AND flag_count == 0.
 
 ## Scope of judgment
@@ -107,7 +107,7 @@ Set `bullet_index` to the 1-based index of the bullet the issue belongs to, matc
 Return ONLY a single JSON object:
 
 {
-  "verdict": "PASS | PASS-WITH-FLAG | FAIL | ERROR",
+  "verdict": "PASS | FLAG | FAIL | ERROR",
   "block_count": 0,
   "flag_count": 0,
   "blocks": [

@@ -10,7 +10,7 @@ Supabase reports + pre-created summaries
   -> Stage 1: skeleton extraction (qwen3-5-27b)
   -> Stage 1b: per-bullet citation alignment (qwen3-5-27b)
   -> Stage 3: LLM judge + deterministic factcheck (gemma-4-31b-it)
-  -> code-computed verdict (PASS / FAIL / PASS-WITH-FLAG / ERROR)
+  -> code-computed verdict (PASS / FAIL / FLAG / ERROR)
   -> Supabase eval_runs
   -> /dashboard
 ```

@@ -91,7 +91,7 @@ Stores one evaluation result per pipeline run attempt. A report that fails PDF e
 | `summary_id` | uuid | No | FK → `summaries.id` |
 | `skeleton_json` | jsonb | No | Stage 1 output; `{}` on ERROR |
 | `judge_json` | jsonb | No | Stage 3 LLM output; `{"verdict": "ERROR", "rationale": "..."}` on ERROR |
-| `verdict` | text | No | `PASS` \| `PASS-WITH-FLAG` \| `FAIL` \| `ERROR` |
+| `verdict` | text | No | `PASS` \| `FLAG` \| `FAIL` \| `ERROR` |
 | `blocks` | jsonb | No | Array of BLOCK issue objects; `[]` on PASS or ERROR |
 | `flags` | jsonb | No | Array of FLAG issue objects; `[]` on PASS or ERROR |
 | `created_at` | timestamptz | No | Auto-set |

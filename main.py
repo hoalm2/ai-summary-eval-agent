@@ -437,12 +437,14 @@ def import_reports(payload: ReportImportRequest, x_demo_token: str | None = Head
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
-def dashboard(source: str = "real") -> str:
+def dashboard(source: str = "real", date: str = "") -> str:
     store = SupabaseStore()
-    all_runs = store.fetch_eval_runs(limit=100)
+    all_runs = store.fetch_eval_runs(limit=200)
     runs = all_runs if source == "all" else [run for run in all_runs if (run.get("summary") or {}).get("summary_model") == "precreated"]
+    if date:
+        runs = [r for r in runs if str(r.get("created_at", "")).startswith(date)]
     aggregate = aggregate_runs(runs)
-    return render_dashboard(aggregate, runs, data_source=source)
+    return render_dashboard(aggregate, runs, data_source=source, date_filter=date)
 
 
 ISSUE_GROUP_LABELS = {
@@ -495,25 +497,30 @@ def format_rate(value: Any) -> str:
 
 def aggregate_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
     total = len(runs)
-    verdict_counts = {"PASS": 0, "FAIL": 0, "PASS-WITH-FLAG": 0, "ERROR": 0}
+    verdict_counts = {"PASS": 0, "FAIL": 0, "FLAG": 0, "ERROR": 0}
     failure_breakdown: dict[str, int] = {}
     hallucination_count = 0
     buy_violation_count = 0
     for run in runs:
         verdict = run.get("verdict", "ERROR")
         verdict_counts[verdict] = verdict_counts.get(verdict, 0) + 1
-        for issue in (run.get("blocks") or []) + (run.get("flags") or []):
+        all_issues = (run.get("blocks") or []) + (run.get("flags") or [])
+        for issue in all_issues:
             category = issue.get("category", "unknown")
             failure_breakdown[category] = failure_breakdown.get(category, 0) + 1
-            if str(category).startswith(("A_", "B_")):
-                hallucination_count += 1
             if str(category).startswith("buy_price"):
                 buy_violation_count += 1
+        if any(
+            str(i.get("category", "")).startswith(("A_", "B_"))
+            and str(i.get("category", "")) != "B_tone_escalation"
+            for i in all_issues
+        ):
+            hallucination_count += 1
     return {
         "total_evaluated": total,
         "pass_count": verdict_counts.get("PASS", 0),
         "fail_count": verdict_counts.get("FAIL", 0),
-        "pass_with_flag_count": verdict_counts.get("PASS-WITH-FLAG", 0),
+        "flag_count": verdict_counts.get("FLAG", 0),
         "error_count": verdict_counts.get("ERROR", 0),
         "pass_rate": verdict_counts.get("PASS", 0) / total if total else 0,
         "hallucination_count": hallucination_count,
@@ -535,7 +542,7 @@ def build_daily_trends(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "total": 0,
                 "pass": 0,
                 "fail": 0,
-                "pass_with_flag": 0,
+                "flag": 0,
                 "error": 0,
                 "hallucination": 0,
                 "buy_violation": 0,
@@ -547,69 +554,22 @@ def build_daily_trends(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
             bucket["pass"] += 1
         elif verdict == "FAIL":
             bucket["fail"] += 1
-        elif verdict == "PASS-WITH-FLAG":
-            bucket["pass_with_flag"] += 1
+        elif verdict == "FLAG":
+            bucket["flag"] += 1
         elif verdict == "ERROR":
             bucket["error"] += 1
-        for issue in (run.get("blocks") or []) + (run.get("flags") or []):
-            category = str(issue.get("category", ""))
-            if category.startswith(("A_", "B_")):
-                bucket["hallucination"] += 1
-            if category.startswith("buy_price"):
-                bucket["buy_violation"] += 1
+        all_issues = (run.get("blocks") or []) + (run.get("flags") or [])
+        if any(
+            str(i.get("category", "")).startswith(("A_", "B_"))
+            and str(i.get("category", "")) != "B_tone_escalation"
+            for i in all_issues
+        ):
+            bucket["hallucination"] += 1
+        if any(str(i.get("category", "")).startswith("buy_price") for i in all_issues):
+            bucket["buy_violation"] += 1
     return [trends[key] for key in sorted(trends.keys(), reverse=True)]
 
 
-def render_bullet_breakdown(
-    bullet_evals: list[dict[str, Any]],
-    blocks: list[dict[str, Any]],
-    flags: list[dict[str, Any]],
-) -> str:
-    if not bullet_evals:
-        return ""
-    issues_by_bullet: dict[int, list[dict[str, Any]]] = {}
-    for issue in blocks + flags:
-        idx = issue.get("bullet_index")
-        if idx is not None:
-            issues_by_bullet.setdefault(int(idx), []).append(issue)
-    rows = []
-    for be in bullet_evals:
-        idx = be.get("bullet_index", "?")
-        bullet_text = html.escape(str(be.get("bullet_text", "")))
-        citations = "".join(
-            f"<blockquote style='margin:2px 0 4px 8px;padding:2px 8px;border-left:3px solid #cddbd8;font-size:11px;color:#555'>{html.escape(str(c))}</blockquote>"
-            for c in (be.get("report_citations") or [])
-        ) or "<span style='color:#aaa;font-size:11px'>—</span>"
-        bullet_issues = issues_by_bullet.get(int(idx) if isinstance(idx, (int, float)) else -1, [])
-        issue_cells = "".join(
-            f"<div style='font-size:11px;margin-bottom:3px'>"
-            f"<span class='issue-group'>{html.escape(issue_group(str(issue.get('category',''))))}</span> "
-            f"<code>{html.escape(str(issue.get('category','')))}</code>: "
-            f"{html.escape(str(issue.get('explanation','')))}</div>"
-            for issue in bullet_issues
-        ) or "<span style='color:#aaa;font-size:11px'>—</span>"
-        rows.append(
-            f"<tr style='vertical-align:top;border-bottom:1px solid #edf2f1'>"
-            f"<td style='padding:5px 8px;font-weight:700;width:24px;color:#0b514b'>{idx}</td>"
-            f"<td style='padding:5px 8px;max-width:300px;font-size:12px'>{bullet_text}</td>"
-            f"<td style='padding:5px 8px;max-width:260px'>{citations}</td>"
-            f"<td style='padding:5px 8px;max-width:220px'>{issue_cells}</td>"
-            "</tr>"
-        )
-    n = len(bullet_evals)
-    return (
-        f"<details style='margin-top:6px'>"
-        f"<summary>Bullet breakdown ({n} bullets)</summary>"
-        f"<table style='width:100%;margin-top:6px;border-collapse:collapse;font-size:12px'>"
-        f"<thead><tr style='background:#f0f5f4'>"
-        f"<th style='padding:4px 8px;text-align:left'>#</th>"
-        f"<th style='padding:4px 8px;text-align:left'>Bullet</th>"
-        f"<th style='padding:4px 8px;text-align:left'>Report citations</th>"
-        f"<th style='padding:4px 8px;text-align:left'>Issues</th>"
-        f"</tr></thead>"
-        f"<tbody>{''.join(rows)}</tbody>"
-        f"</table></details>"
-    )
 
 
 def render_sparkline(trends: list[dict[str, Any]], width: int = 80, height: int = 24) -> str:
@@ -636,30 +596,111 @@ def render_sparkline(trends: list[dict[str, Any]], width: int = 80, height: int 
 
 
 def render_run_detail(run: dict[str, Any], idx: int) -> str:
+    from collections import Counter, defaultdict
     report = run.get("report") or {}
     summary = run.get("summary") or {}
-    issues = (run.get("blocks") or []) + (run.get("flags") or [])
-    ticker = html.escape(str(report.get("ticker", "")))
-    report_date = html.escape(str(report.get("report_date", "")))
+    blocks = run.get("blocks") or []
+    flags = run.get("flags") or []
+    issues = blocks + flags
+    ticker = html.escape(str(report.get("ticker") or ""))
+    report_date = html.escape(str(report.get("report_date") or ""))
     verdict = str(run.get("verdict", ""))
     verdict_esc = html.escape(verdict)
     summary_text = html.escape(str(summary.get("summary_text", "")))
-    summary_model = html.escape(str(summary.get("summary_model", "")))
     created_at = html.escape(str(run.get("created_at", ""))[:19])
-    issue_html = "".join(
-        f"<div class='issue-row'>"
-        f"<span class='issue-group'>{html.escape(issue_group(str(i.get('category', ''))))}</span> "
-        f"<code>{html.escape(str(i.get('category', '')))}</code>: "
-        f"{html.escape(str(i.get('summary_quote', '')))} — {html.escape(str(i.get('explanation', '')))}"
-        f"</div>"
-        for i in issues
-    ) or "<em style='color:#aaa;font-size:12px'>No issues</em>"
     bullet_evals_data = run.get("bullet_evals") or []
-    bullet_html = render_bullet_breakdown(bullet_evals_data, run.get("blocks") or [], run.get("flags") or [])
-    issues_json = html.escape(json.dumps(issues, ensure_ascii=False, indent=2))
-    skeleton_json = html.escape(json.dumps(run.get("skeleton_json") or {}, ensure_ascii=False, indent=2))
-    judge_json = html.escape(json.dumps(run.get("judge_json") or {}, ensure_ascii=False, indent=2))
-    bullet_json = html.escape(json.dumps(bullet_evals_data, ensure_ascii=False, indent=2))
+    skeleton_json = run.get("skeleton_json")
+
+    # Issue summary + breakdown table
+    if verdict == "ERROR":
+        judge = run.get("judge_json") or {}
+        error_reason = html.escape(str(judge.get("rationale", "Unknown pipeline error"))[:400])
+        issues_section = (
+            f"<div style='background:#fff8f0;border-left:3px solid #e07030;padding:8px 12px;"
+            f"border-radius:6px;font-size:12px;margin:8px 0'>"
+            f"<strong>Pipeline error</strong> — pipeline bị crash trước khi hoàn thành.<br>"
+            f"<span style='color:#5b716e'>{error_reason}</span></div>"
+        )
+    elif issues:
+        total_bullets = len(bullet_evals_data)
+        issue_bullet_indices = {i.get("bullet_index") for i in issues if i.get("bullet_index") is not None}
+        bullets_with_issues = len(issue_bullet_indices)
+        if total_bullets > 0:
+            summary_line = (
+                f"<p style='margin:6px 0 8px;font-size:13px'>"
+                f"<strong>{bullets_with_issues}/{total_bullets}</strong> bullet có vấn đề"
+                f" &nbsp;·&nbsp; <span class='badge fail' style='font-size:11px'>{len(blocks)} block</span>"
+                f" <span class='badge flag' style='font-size:11px'>{len(flags)} flag</span></p>"
+            )
+        else:
+            summary_line = (
+                f"<p style='margin:6px 0 8px;font-size:13px'>"
+                f"<strong>{len(issues)}</strong> issues"
+                f" &nbsp;·&nbsp; <span class='badge fail' style='font-size:11px'>{len(blocks)} block</span>"
+                f" <span class='badge flag' style='font-size:11px'>{len(flags)} flag</span></p>"
+            )
+        cat_counts = Counter(str(i.get("category", "unknown")) for i in issues)
+        total_cat = sum(cat_counts.values())
+        table_rows = "".join(
+            f"<tr>"
+            f"<td style='padding:5px 8px'><span class='issue-group'>{html.escape(issue_group(cat))}</span></td>"
+            f"<td style='padding:5px 8px'><code>{html.escape(cat)}</code></td>"
+            f"<td style='padding:5px 8px;text-align:right;font-weight:700'>{cnt}</td>"
+            f"<td style='padding:5px 8px;text-align:right;color:#5b716e'>{cnt/total_cat*100:.0f}%</td>"
+            f"</tr>"
+            for cat, cnt in cat_counts.most_common()
+        )
+        breakdown_html = (
+            f"<table style='width:100%;border-collapse:collapse;font-size:12px;margin-bottom:12px'>"
+            f"<thead><tr style='background:#f0f5f4'>"
+            f"<th style='padding:5px 8px;text-align:left'>Group</th>"
+            f"<th style='padding:5px 8px;text-align:left'>Category</th>"
+            f"<th style='padding:5px 8px;text-align:right'>Count</th>"
+            f"<th style='padding:5px 8px;text-align:right'>%</th>"
+            f"</tr></thead><tbody>{table_rows}</tbody></table>"
+        )
+        issues_section = summary_line + breakdown_html
+    else:
+        issues_section = ""
+
+    # Enrich bullet_evals with categories from issues
+    bullet_categories: dict[int, list[str]] = defaultdict(list)
+    for issue in issues:
+        bidx = issue.get("bullet_index")
+        cat = issue.get("category")
+        if bidx is not None and cat:
+            bullet_categories[int(bidx)].append(str(cat))
+    enriched_bullets = []
+    for be in bullet_evals_data:
+        entry = dict(be)
+        bidx = be.get("bullet_index")
+        if bidx is not None:
+            cats = bullet_categories.get(int(bidx), [])
+            if cats:
+                entry["issues"] = cats
+        enriched_bullets.append(entry)
+
+    inspect_parts = []
+    if enriched_bullets:
+        bullets_json = html.escape(json.dumps(enriched_bullets, ensure_ascii=False, indent=2))
+        inspect_parts.append(
+            f"<details open><summary style='cursor:pointer;font-weight:700'>Bullet evals</summary>"
+            f"<pre style='margin:6px 0 0'>{bullets_json}</pre></details>"
+        )
+    elif issues:
+        # fallback when bullet_evals not stored: show raw issues so inspect isn't empty
+        issues_json = html.escape(json.dumps(issues, ensure_ascii=False, indent=2))
+        inspect_parts.append(
+            f"<details open><summary style='cursor:pointer;font-weight:700'>Issues</summary>"
+            f"<pre style='margin:6px 0 0'>{issues_json}</pre></details>"
+        )
+    if skeleton_json:
+        skeleton_str = html.escape(json.dumps(skeleton_json, ensure_ascii=False, indent=2))
+        inspect_parts.append(
+            f"<details style='margin-top:8px'><summary style='cursor:pointer;font-weight:700'>Skeleton</summary>"
+            f"<pre style='margin:6px 0 0'>{skeleton_str}</pre></details>"
+        )
+
     return (
         f"<div class='detail-pane' id='detail-{idx}'>"
         f"<div class='detail-header'>"
@@ -668,65 +709,16 @@ def render_run_detail(run: dict[str, Any], idx: int) -> str:
         f"<span class='detail-date'>{report_date}</span>"
         f"<span class='detail-time'>{created_at}</span>"
         f"</div>"
-        f"<div class='detail-model'>Source: <code>{summary_model or 'unknown'}</code></div>"
-        f"<h4>Issues</h4>{issue_html}"
-        f"{bullet_html}"
+        f"{issues_section}"
         f"<h4>Summary text</h4>"
         f"<div class='summary'>{summary_text or '<em>No summary saved</em>'}</div>"
-        f"<details><summary>Inspect JSON</summary>"
-        f"<h4>Issues</h4><pre>{issues_json}</pre>"
-        f"<h4>Bullet evals</h4><pre>{bullet_json}</pre>"
-        f"<h4>Skeleton</h4><pre>{skeleton_json}</pre>"
-        f"<h4>Judge</h4><pre>{judge_json}</pre>"
-        f"</details></div>"
-    )
-
-
-def render_demo_example(run: dict[str, Any] | None, label: str) -> str:
-    if not run:
-        return (
-            f"<div class='card'><h3>{html.escape(label)}</h3>"
-            f"<p class='muted'>No {html.escape(label.lower())} available in current batch.</p></div>"
-        )
-    report = run.get("report") or {}
-    summary = run.get("summary") or {}
-    issues = (run.get("blocks") or []) + (run.get("flags") or [])
-    ticker = html.escape(str(report.get("ticker", "")))
-    report_date = html.escape(str(report.get("report_date", "")))
-    verdict = str(run.get("verdict", ""))
-    verdict_esc = html.escape(verdict)
-    summary_text = html.escape(str(summary.get("summary_text", "")))
-    issue_html = "".join(
-        f"<div class='issue-row'>"
-        f"<span class='issue-group'>{html.escape(issue_group(str(i.get('category', ''))))}</span> "
-        f"<code>{html.escape(str(i.get('category', '')))}</code>: "
-        f"{html.escape(str(i.get('summary_quote', '')))} — {html.escape(str(i.get('explanation', '')))}"
-        f"</div>"
-        for i in issues
-    ) or "<em class='muted'>No issues</em>"
-    bullet_evals_data = run.get("bullet_evals") or []
-    bullet_html = render_bullet_breakdown(bullet_evals_data, run.get("blocks") or [], run.get("flags") or [])
-    skeleton_json = html.escape(json.dumps(run.get("skeleton_json") or {}, ensure_ascii=False, indent=2))
-    judge_json = html.escape(json.dumps(run.get("judge_json") or {}, ensure_ascii=False, indent=2))
-    bullet_json = html.escape(json.dumps(bullet_evals_data, ensure_ascii=False, indent=2))
-    return (
-        f"<div class='card'>"
-        f"<div class='detail-header'>"
-        f"<span class='detail-ticker'>{ticker}</span>"
-        f"<span class='badge {verdict.lower()}'>{verdict_esc}</span>"
-        f"<span class='detail-date'>{report_date}</span>"
-        f"</div>"
-        f"<h4>Issues</h4>{issue_html}"
-        f"{bullet_html}"
-        f"<h4>Summary text</h4><div class='summary'>{summary_text or '<em>No summary saved</em>'}</div>"
-        f"<details open><summary>Skeleton JSON (Stage 1)</summary><pre>{skeleton_json}</pre></details>"
-        f"<details open><summary>Bullet citations (Stage 1b)</summary><pre>{bullet_json}</pre></details>"
-        f"<details open><summary>Judge rationale (Stage 3b)</summary><pre>{judge_json}</pre></details>"
+        f"{''.join(inspect_parts)}"
         f"</div>"
     )
 
 
-def render_dashboard(aggregate: dict[str, Any], runs: list[dict[str, Any]], *, data_source: str = "real") -> str:
+
+def render_dashboard(aggregate: dict[str, Any], runs: list[dict[str, Any]], *, data_source: str = "real", date_filter: str = "") -> str:
     # Zone 0: safety banner
     has_safety = aggregate["hallucination_count"] > 0 or aggregate["buy_violation_count"] > 0
     banner_html = (
@@ -750,21 +742,23 @@ def render_dashboard(aggregate: dict[str, Any], runs: list[dict[str, Any]], *, d
     trends = build_daily_trends(runs)
     sparkline = render_sparkline(trends)
 
-    def metric_card(label: str, value: str, target_label: str, ok: bool, extra: str = "") -> str:
+    def metric_card(label: str, value: str, target_label: str, ok: bool, extra: str = "", onclick: str = "") -> str:
         color = "#12612f" if ok else "#9d1c14"
         bg = "#dff7e8" if ok else "#ffe1df"
+        extra_style = ";cursor:pointer" if onclick else ""
+        onclick_attr = f" onclick=\"{onclick}\" role=\"button\" title=\"Click to filter runs\"" if onclick else ""
         return (
-            f"<div class='metric-card' style='border-top:3px solid {color}'>"
+            f"<div class='metric-card' style='border-top:3px solid {color}{extra_style}'{onclick_attr}>"
             f"<div class='metric-label'>{label}</div>"
             f"<div class='metric-value' style='color:{color}'>{value}</div>"
             f"<div class='metric-target' style='background:{bg};color:{color}'>{target_label}</div>"
             f"{extra}</div>"
         )
 
-    pass_card = metric_card("Pass rate", format_rate(pass_rate), "target ≥ 85%", pass_ok, extra=sparkline)
-    hall_card = metric_card("Hallucination rate", format_rate(hallucination_rate), "target ≤ 2%", hall_ok)
-    buy_card = metric_card("Buy violations", str(buy_violations), "target = 0", buy_ok)
-    creation_card = metric_card("Creation success", format_rate(creation_success_rate), "target ≥ 98%", creation_ok)
+    pass_card = metric_card("Pass rate", format_rate(pass_rate), "target ≥ 85%", pass_ok, extra=sparkline, onclick="filterAndSwitchTab('PASS')")
+    hall_card = metric_card("Hallucination rate", format_rate(hallucination_rate), "target ≤ 2%", hall_ok, onclick="filterAndSwitchTab('FAIL')")
+    buy_card = metric_card("Buy violations", str(buy_violations), "target = 0", buy_ok, onclick="filterByGroup('BUY')")
+    creation_card = metric_card("Creation success", format_rate(creation_success_rate), "target ≥ 98%", creation_ok, onclick="filterAndSwitchTab('ERROR')")
 
     # Zone 1: failure patterns
     group_counts: dict[str, int] = {}
@@ -775,21 +769,19 @@ def render_dashboard(aggregate: dict[str, Any], runs: list[dict[str, Any]], *, d
     failure_pattern_rows = ""
     for rank, (group, count) in enumerate(sorted(group_counts.items(), key=lambda x: -x[1]), 1):
         pct = count / total_issues * 100 if total_issues else 0
-        is_systemic = pct > 30
         fix = SUGGESTED_FIXES.get(group, SUGGESTED_FIXES["OTHER"])
-        systemic_badge = "<span class='systemic-badge'>⚠ systemic &gt;30%</span>" if is_systemic else ""
-        extra_class = " pattern-systemic" if is_systemic else ""
         failure_pattern_rows += (
-            f"<div class='pattern-row{extra_class}'>"
+            f"<div class='pattern-row' data-group='{html.escape(group)}'>"
             f"<div class='pattern-rank'>{rank}</div>"
             f"<div class='pattern-body'>"
             f"<div class='pattern-name'>"
             f"<span class='issue-group'>{html.escape(group)}</span> "
             f"<strong>{html.escape(ISSUE_GROUP_LABELS.get(group, group))}</strong>"
-            f"<span class='pattern-count'>{count} ({pct:.0f}%)</span>"
-            f"{systemic_badge}</div>"
+            f"<span class='pattern-count'>{count} ({pct:.0f}%)</span></div>"
             f"<div class='pattern-fix'>→ {fix}</div>"
-            f"</div></div>"
+            f"</div>"
+            f"<button class='show-runs-btn' onclick=\"filterByGroup('{html.escape(group)}')\" title='Switch to Runs tab filtered by this issue group'>Show runs →</button>"
+            f"</div>"
         )
     if not failure_pattern_rows:
         failure_pattern_rows = "<p class='muted'>No failures this batch.</p>"
@@ -809,7 +801,7 @@ def render_dashboard(aggregate: dict[str, Any], runs: list[dict[str, Any]], *, d
             f"<td>{format_rate(pr)}</td>"
             f"<td>{trend['pass']}</td>"
             f"<td>{trend['fail']}</td>"
-            f"<td>{trend['pass_with_flag']}</td>"
+            f"<td>{trend['flag']}</td>"
             f"<td>{trend['error']}</td>"
             f"<td>{trend['hallucination']} ({format_rate(hr)})</td>"
             f"<td>{trend['buy_violation']}</td>"
@@ -823,27 +815,26 @@ def render_dashboard(aggregate: dict[str, Any], runs: list[dict[str, Any]], *, d
         report = run.get("report") or {}
         verdict = str(run.get("verdict", ""))
         ticker = html.escape(str(report.get("ticker", "")))
-        report_date = html.escape(str(report.get("report_date", "")))
+        eval_date = html.escape(str(run.get("created_at") or "")[:10])
+        run_issues = (run.get("blocks") or []) + (run.get("flags") or [])
+        run_groups = sorted({issue_group(str(iss.get("category", ""))) for iss in run_issues})
+        groups_str = html.escape(",".join(run_groups))
         run_list_rows.append(
             f"<tr class='run-row' data-idx='{i}' data-verdict='{html.escape(verdict)}' "
-            f"data-ticker='{ticker.lower()}' data-date='{report_date.lower()}'>"
+            f"data-ticker='{ticker.lower()}' data-date='{eval_date.lower()}' data-groups='{groups_str}'>"
             f"<td><span class='badge {verdict.lower()}'>{html.escape(verdict)}</span></td>"
             f"<td>{ticker}</td>"
-            f"<td>{report_date}</td>"
+            f"<td>{eval_date}</td>"
             f"</tr>"
         )
         detail_divs.append(render_run_detail(run, i))
-
-    # Zone 4: demo examples
-    demo_pass = next((r for r in runs if r.get("verdict") == "PASS"), None)
-    demo_fail = next((r for r in runs if r.get("verdict") == "FAIL"), None)
-    demo_pass_html = render_demo_example(demo_pass, "PASS example")
-    demo_fail_html = render_demo_example(demo_fail, "FAIL example")
 
     data_source_label = html.escape(
         "Real precreated summaries only" if data_source != "all" else "All eval runs, including demo/mock history"
     )
     run_count = len(runs)
+    latest_eval_time = max((str(r.get("created_at", ""))[:19] for r in runs), default="—")
+    date_filter_val = html.escape(date_filter)
 
     return f"""<!doctype html>
 <html lang="vi">
@@ -881,13 +872,11 @@ def render_dashboard(aggregate: dict[str, Any], runs: list[dict[str, Any]], *, d
     .split-overview {{ display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }}
     .pattern-row {{ display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid #edf2f1; align-items: flex-start; }}
     .pattern-row:last-child {{ border-bottom: none; }}
-    .pattern-systemic {{ background: #fff8f0; border-radius: 8px; padding: 10px; margin: 2px -10px; }}
     .pattern-rank {{ width: 20px; font-size: 16px; font-weight: 700; color: #b0c4c1; flex-shrink: 0; padding-top: 1px; }}
     .pattern-body {{ flex: 1; min-width: 0; }}
     .pattern-name {{ display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }}
     .pattern-count {{ font-size: 12px; color: #5b716e; }}
     .pattern-fix {{ font-size: 12px; color: #5b716e; }}
-    .systemic-badge {{ background: #fff3cd; color: #a05800; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }}
     .filters {{ display: flex; gap: 12px; flex-wrap: wrap; align-items: end; margin-bottom: 14px; }}
     .filters label {{ display: grid; gap: 4px; font-size: 12px; font-weight: 700; }}
     input, select {{ padding: 7px 11px; border: 1px solid #cddbd8; border-radius: 8px; font-size: 13px; background: white; }}
@@ -912,12 +901,11 @@ def render_dashboard(aggregate: dict[str, Any], runs: list[dict[str, Any]], *, d
     table.trend th, table.trend td {{ padding: 9px 12px; border-bottom: 1px solid #edf2f1; text-align: left; font-size: 13px; }}
     table.trend th {{ background: #0b514b; color: white; font-size: 12px; }}
     .badge-warn {{ background: #fff3cd; color: #a05800; font-size: 10px; padding: 1px 5px; border-radius: 999px; font-weight: 700; }}
-    .demo-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }}
     code {{ background: #eef6f4; padding: 2px 6px; border-radius: 6px; font-size: 12px; }}
     .badge {{ display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 700; }}
     .pass {{ background: #dff7e8; color: #12612f; }}
     .fail {{ background: #ffe1df; color: #9d1c14; }}
-    .pass-with-flag {{ background: #fff3cf; color: #7a5400; }}
+    .flag {{ background: #fff3cf; color: #7a5400; }}
     .error {{ background: #eceff3; color: #344054; }}
     .issue-group {{ display: inline-block; min-width: 44px; padding: 2px 7px; border-radius: 999px; background: #e8f3f1; color: #0b514b; font-size: 11px; font-weight: 800; text-align: center; }}
     .summary {{ max-width: 100%; white-space: pre-wrap; font-size: 13px; background: #f6f8f8; border-radius: 10px; padding: 10px 14px; margin: 4px 0; }}
@@ -925,9 +913,17 @@ def render_dashboard(aggregate: dict[str, Any], runs: list[dict[str, Any]], *, d
     details {{ margin-top: 8px; }}
     summary {{ cursor: pointer; color: #0b514b; font-weight: 700; font-size: 13px; }}
     pre {{ white-space: pre-wrap; font-size: 12px; background: #f6f8f8; border: 1px solid #e4ecea; border-radius: 10px; padding: 10px; max-height: 360px; overflow-y: auto; margin: 6px 0; }}
+    .metric-card:hover {{ box-shadow: 0 4px 16px rgba(22,49,47,.15); transform: translateY(-1px); transition: box-shadow .15s, transform .15s; }}
+    .metric-card {{ transition: box-shadow .15s, transform .15s; }}
+    .clickable-badge {{ cursor: pointer; transition: opacity .12s; }}
+    .clickable-badge:hover {{ opacity: .75; }}
+    .show-runs-btn {{ background: none; border: 1px solid #0b514b; border-radius: 6px; padding: 3px 9px; cursor: pointer; font-size: 11px; font-weight: 700; color: #0b514b; white-space: nowrap; flex-shrink: 0; align-self: center; transition: background .12s; }}
+    .show-runs-btn:hover {{ background: #e8f3f1; }}
+    .pattern-row {{ align-items: center; }}
+    .group-banner {{ background: #e8f3f1; color: #0b514b; padding: 7px 14px; border-radius: 8px; font-size: 12px; font-weight: 700; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }}
     @media (max-width: 900px) {{
       .metrics-row {{ grid-template-columns: repeat(2, 1fr); }}
-      .split-panel, .demo-grid, .split-overview {{ grid-template-columns: 1fr; }}
+      .split-panel, .split-overview {{ grid-template-columns: 1fr; }}
     }}
   </style>
 </head>
@@ -937,9 +933,22 @@ def render_dashboard(aggregate: dict[str, Any], runs: list[dict[str, Any]], *, d
   <div class="zone0-inner">
     <div class="zone0-title">
       <h1>AI Summary Eval Dashboard</h1>
-      <span class="zone0-meta">{data_source_label} · <a href="/dashboard">Real only</a> · <a href="/dashboard?source=all">All history</a></span>
+      <span class="zone0-meta" style="margin-left:auto">
+        Last eval: <strong>{latest_eval_time}</strong>
+        &nbsp;·&nbsp; {run_count} runs
+        &nbsp;·&nbsp; <a href="/dashboard">Real only</a> · <a href="/dashboard?source=all">All history</a>
+      </span>
     </div>
-    {banner_html}
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+      {banner_html}
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;white-space:nowrap;flex-shrink:0">
+        Filter date
+        <input type="date" id="headerDate" value="{date_filter_val}"
+          style="padding:4px 8px;border:1px solid #cddbd8;border-radius:6px;font-size:12px"
+          onchange="window.location.href='/dashboard?source={data_source}&date='+this.value">
+        {f"<a href='/dashboard?source={data_source}' style='font-size:11px;color:#9d1c14'>✕ Clear</a>" if date_filter else ""}
+      </label>
+    </div>
     <div class="metrics-row">
       {pass_card}
       {hall_card}
@@ -950,12 +959,12 @@ def render_dashboard(aggregate: dict[str, Any], runs: list[dict[str, Any]], *, d
       <button class="tab-btn active" data-tab="overview">Overview</button>
       <button class="tab-btn" data-tab="runs">Runs ({run_count})</button>
       <button class="tab-btn" data-tab="trend">Trend</button>
-      <button class="tab-btn" data-tab="demo">Demo</button>
     </nav>
   </div>
 </header>
 
 <section class="tab-panel active" id="tab-overview">
+  <p style="font-size:12px;color:#5b716e;margin:0 0 12px">Tổng quan chất lượng batch: bảng failure pattern theo nhóm category (để biết lỗi tập trung ở đâu) và phân phối verdict. Click metric card hoặc badge để lọc sang tab Runs.</p>
   <div class="split-overview">
     <div class="card">
       <h2>Failure patterns</h2>
@@ -964,13 +973,13 @@ def render_dashboard(aggregate: dict[str, Any], runs: list[dict[str, Any]], *, d
     <div class="card">
       <h2>Batch summary</h2>
       <p style="margin:0 0 8px"><strong>Total runs:</strong> {aggregate["total_evaluated"]}</p>
-      <p style="margin:0 0 8px">
-        <span class="badge pass">PASS {aggregate["pass_count"]}</span>&nbsp;
-        <span class="badge fail">FAIL {aggregate["fail_count"]}</span>&nbsp;
-        <span class="badge pass-with-flag">FLAG {aggregate["pass_with_flag_count"]}</span>&nbsp;
-        <span class="badge error">ERROR {aggregate["error_count"]}</span>
+      <p style="margin:0 0 10px">
+        <span class="badge pass clickable-badge" onclick="filterAndSwitchTab('PASS')" title="Show PASS runs">PASS {aggregate["pass_count"]}</span>&nbsp;
+        <span class="badge fail clickable-badge" onclick="filterAndSwitchTab('FAIL')" title="Show FAIL runs">FAIL {aggregate["fail_count"]}</span>&nbsp;
+        <span class="badge flag clickable-badge" onclick="filterAndSwitchTab('FLAG')" title="Show flagged runs">FLAG {aggregate["flag_count"]}</span>&nbsp;
+        <span class="badge error clickable-badge" onclick="filterAndSwitchTab('ERROR')" title="Show ERROR runs">ERROR {aggregate["error_count"]}</span>
       </p>
-      <p style="font-size:12px;color:#5b716e;margin:12px 0 0">Full report text is intentionally hidden in all endpoints.</p>
+      <p style="font-size:12px;color:#5b716e;margin:0">Click a badge to filter runs. Full report text is intentionally hidden.</p>
     </div>
   </div>
 </section>
@@ -982,12 +991,17 @@ def render_dashboard(aggregate: dict[str, Any], runs: list[dict[str, Any]], *, d
         <option value="">All</option>
         <option value="PASS">PASS</option>
         <option value="FAIL">FAIL</option>
-        <option value="PASS-WITH-FLAG">PASS-WITH-FLAG</option>
+        <option value="FLAG">FLAG</option>
         <option value="ERROR">ERROR</option>
       </select>
     </label>
     <label>Ticker <input id="tickerFilter" placeholder="e.g. VTP"></label>
-    <label>Report date <input id="dateFilter" placeholder="e.g. 2026-06"></label>
+    <label>Eval date <input id="dateFilter" placeholder="e.g. 2026-06"></label>
+  </div>
+  <div id="groupBanner" class="group-banner" style="display:none">
+    <span>Filtered by issue group:</span>
+    <span id="groupBannerLabel" style="font-weight:800"></span>
+    <button onclick="clearGroupFilter()" style="margin-left:auto;background:none;border:1px solid #0b514b;border-radius:6px;padding:2px 8px;cursor:pointer;font-size:11px;color:#0b514b;font-weight:700">✕ Clear filter</button>
   </div>
   <div class="split-panel">
     <div class="run-list-wrap">
@@ -995,19 +1009,20 @@ def render_dashboard(aggregate: dict[str, Any], runs: list[dict[str, Any]], *, d
         <thead><tr style="background:#0b514b;color:white">
           <th style="padding:8px 12px;font-size:12px">Verdict</th>
           <th style="padding:8px 12px;font-size:12px">Ticker</th>
-          <th style="padding:8px 12px;font-size:12px">Date</th>
+          <th style="padding:8px 12px;font-size:12px">Eval date</th>
         </tr></thead>
         <tbody id="runsBody">{"".join(run_list_rows) or "<tr><td colspan='3' style='padding:20px;color:#aaa;text-align:center'>No runs</td></tr>"}</tbody>
       </table>
     </div>
     <div class="run-detail-wrap" id="runDetailWrap">
-      <div class="detail-placeholder" id="detailPlaceholder">← Select a run to inspect</div>
+      <div class="detail-placeholder" id="detailPlaceholder"></div>
       {"".join(detail_divs)}
     </div>
   </div>
 </section>
 
 <section class="tab-panel" id="tab-trend">
+  <p style="font-size:12px;color:#5b716e;margin:0 0 12px">Pass rate theo từng ngày — dùng để phát hiện sớm xu hướng chất lượng xấu đi theo thời gian. Mỗi hàng là 1 ngày eval. Threshold: pass rate ≥ 85%, hallucination ≤ 2%.</p>
   <div class="card">
     <h2>Pass rate trend <span style="font-size:12px;font-weight:400;color:#5b716e">(85% threshold)</span></h2>
     <table class="trend">
@@ -1019,38 +1034,74 @@ def render_dashboard(aggregate: dict[str, Any], runs: list[dict[str, Any]], *, d
   </div>
 </section>
 
-<section class="tab-panel" id="tab-demo">
-  <div class="demo-grid">
-    {demo_pass_html}
-    {demo_fail_html}
-  </div>
-</section>
 
 <script>
+  // ── Tab switching ──────────────────────────────────────────────────────
   const tabBtns = document.querySelectorAll('.tab-btn');
   const tabPanels = document.querySelectorAll('.tab-panel');
-  tabBtns.forEach(btn => {{
-    btn.addEventListener('click', () => {{
-      tabBtns.forEach(b => b.classList.remove('active'));
-      tabPanels.forEach(p => p.classList.remove('active'));
-      btn.classList.add('active');
-      document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
-    }});
-  }});
+  function switchToTab(name) {{
+    tabBtns.forEach(b => b.classList.remove('active'));
+    tabPanels.forEach(p => p.classList.remove('active'));
+    const btn = document.querySelector('.tab-btn[data-tab="' + name + '"]');
+    if (btn) btn.classList.add('active');
+    const panel = document.getElementById('tab-' + name);
+    if (panel) panel.classList.add('active');
+  }}
+  tabBtns.forEach(btn => btn.addEventListener('click', () => switchToTab(btn.dataset.tab)));
+
+  // ── Filter state ───────────────────────────────────────────────────────
   const verdictFilter = document.getElementById('verdictFilter');
   const tickerFilter = document.getElementById('tickerFilter');
   const dateFilter = document.getElementById('dateFilter');
   const runRows = Array.from(document.querySelectorAll('#runsBody .run-row'));
+  const groupBanner = document.getElementById('groupBanner');
+  const groupBannerLabel = document.getElementById('groupBannerLabel');
+  let activeGroupFilter = '';
+
   function applyFilters() {{
-    const v = verdictFilter.value, t = tickerFilter.value.trim().toLowerCase(), d = dateFilter.value.trim().toLowerCase();
+    const v = verdictFilter.value;
+    const t = tickerFilter.value.trim().toLowerCase();
+    const d = dateFilter.value.trim().toLowerCase();
     for (const row of runRows) {{
-      const ok = (!v || row.dataset.verdict === v) && (!t || row.dataset.ticker.includes(t)) && (!d || row.dataset.date.includes(d));
+      const groups = row.dataset.groups ? row.dataset.groups.split(',') : [];
+      const ok = (!v || row.dataset.verdict === v)
+        && (!t || row.dataset.ticker.includes(t))
+        && (!d || row.dataset.date.includes(d))
+        && (!activeGroupFilter || groups.includes(activeGroupFilter));
       row.style.display = ok ? '' : 'none';
     }}
+    if (groupBanner) groupBanner.style.display = activeGroupFilter ? 'flex' : 'none';
   }}
   verdictFilter.addEventListener('change', applyFilters);
   tickerFilter.addEventListener('input', applyFilters);
   dateFilter.addEventListener('input', applyFilters);
+
+  // ── Metric card / badge drilldown ──────────────────────────────────────
+  function filterAndSwitchTab(verdict) {{
+    activeGroupFilter = '';
+    verdictFilter.value = verdict;
+    tickerFilter.value = '';
+    dateFilter.value = '';
+    switchToTab('runs');
+    applyFilters();
+  }}
+
+  function filterByGroup(group) {{
+    activeGroupFilter = group;
+    verdictFilter.value = '';
+    tickerFilter.value = '';
+    dateFilter.value = '';
+    if (groupBannerLabel) groupBannerLabel.textContent = group;
+    switchToTab('runs');
+    applyFilters();
+  }}
+
+  function clearGroupFilter() {{
+    activeGroupFilter = '';
+    applyFilters();
+  }}
+
+  // ── Run detail pane ────────────────────────────────────────────────────
   const placeholder = document.getElementById('detailPlaceholder');
   let activeRow = null, activePane = null;
   runRows.forEach(row => {{

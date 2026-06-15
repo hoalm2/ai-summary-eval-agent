@@ -85,5 +85,5 @@ def compute_verdict(blocks: list[dict], flags: list[dict], parse_error: bool = F
     if len(blocks) >= 1 or len(flags) >= 2:
         return "FAIL"
     if len(flags) == 1:
-        return "PASS-WITH-FLAG"
+        return "FLAG"
     return "PASS"

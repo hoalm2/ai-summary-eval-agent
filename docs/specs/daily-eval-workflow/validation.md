@@ -8,7 +8,7 @@
 - [ ] Daily workflow feature spec exists with requirements, plan, and validation docs.
       verify: `test -f docs/specs/daily-eval-workflow/requirements.md && test -f docs/specs/daily-eval-workflow/plan.md && test -f docs/specs/daily-eval-workflow/validation.md`
 
-- [ ] Verdict rules in docs match final checklist: FAIL for any BLOCK or at least 2 FLAGs; PASS-WITH-FLAG for exactly 1 FLAG; PASS for no issues.
+- [ ] Verdict rules in docs match final checklist: FAIL for any BLOCK or at least 2 FLAGs; FLAG for exactly 1 FLAG; PASS for no issues.
       verify: compare `docs/specs/daily-eval-workflow/requirements.md` with `Eval checklist.rtf` rating rules.
 
 ## Local Mock Workflow
@@ -48,7 +48,7 @@
 - [ ] Buy-price timing fixture returns `FAIL` with BUY issue.
       verify: run golden fixture test where summary says “nên mua ngay” or equivalent timing advice.
 
-- [ ] Disclaimer omission fixture returns `PASS-WITH-FLAG` when exactly one material caveat is omitted.
+- [ ] Disclaimer omission fixture returns `FLAG` when exactly one material caveat is omitted.
       verify: run golden fixture test with one `C_disclaimer_omission`.
 
 - [ ] Two FLAG issues produce `FAIL`.
@@ -76,7 +76,7 @@
 
 ## Dashboard Readiness
 
-- [ ] Dashboard shows aggregate totals, pass/fail/pass-with-flag counts, pass rate, hallucination count/rate, buy violation count, and failure breakdown.
+- [ ] Dashboard shows aggregate totals, pass/fail/flag counts, pass rate, hallucination count/rate, buy violation count, and failure breakdown.
       verify: open `/dashboard` after seeded evals and visually inspect metrics.
 
 - [ ] Dashboard detail list shows ticker, date, verdict badge, generated summary, issues, skeleton JSON, and judge JSON.

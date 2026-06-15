@@ -42,6 +42,7 @@ class Settings:
     model_summary: str
     model_judge: str
     model_fallback: str
+    anthropic_api_key: str
     supabase_url: str
     supabase_service_role_key: str
     demo_token: str
@@ -68,6 +69,7 @@ def get_settings() -> Settings:
         model_summary=os.getenv("MODEL_SUMMARY", "openai/gpt-5-mini"),
         model_judge=os.getenv("MODEL_JUDGE", "openai/gpt-5-mini"),
         model_fallback=os.getenv("MODEL_FALLBACK", "deepseek/deepseek-v4-pro"),
+        anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
         supabase_url=os.getenv("SUPABASE_URL", ""),
         supabase_service_role_key=os.getenv("SUPABASE_SERVICE_ROLE_KEY", ""),
         demo_token=os.getenv("DEMO_TOKEN", ""),

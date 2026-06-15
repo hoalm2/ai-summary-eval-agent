@@ -154,7 +154,7 @@ GOLDEN_EVAL_CASES = [
                 "explanation": "Summary bỏ caveat quan trọng làm thay đổi cách diễn giải.",
             }
         ],
-        "expected_verdict": "PASS-WITH-FLAG",
+        "expected_verdict": "FLAG",
         "expected_categories": {"C_disclaimer_omission"},
     },
     {
@@ -192,7 +192,7 @@ GOLDEN_EVAL_CASES = [
                 "explanation": "Summary có ký tự render lỗi.",
             }
         ],
-        "expected_verdict": "PASS-WITH-FLAG",
+        "expected_verdict": "FLAG",
         "expected_categories": {"render"},
     },
 ]
