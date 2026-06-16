@@ -356,3 +356,22 @@ The mock judge uses the following keyword triggers for test coverage:
 | `"bứt phá"` or `"tăng vọt"` | `B_tone_escalation` BLOCK |
 | `"đã phục hồi"` + `"kỳ vọng"` present in full prompt | `A_logic_temporal` BLOCK |
 | `"rủi ro chính"` in report but not in summary section | `C_disclaimer_omission` FLAG |
+
+---
+
+## Tech Stack
+
+| Layer | Choice |
+|---|---|
+| Language | Python 3.11 |
+| Web framework | FastAPI |
+| Server | Uvicorn |
+| Container | Docker — exposes port `8080` |
+| Storage | Supabase Postgres |
+| LLM provider | GreenNode MaaS (OpenAI-compatible endpoint) |
+
+**Required env vars:** `GREENNODE_API_KEY`, `GREENNODE_BASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `DEMO_TOKEN`
+
+**Key optional vars:** `MOCK_LLM_MODE` (default `true`), `MODEL_SKELETON`, `MODEL_JUDGE`, `MODEL_FALLBACK`, `ALLOWED_PDF_HOSTS`, `REPORT_TEXT_MIN_CHARS`
+
+Model swap requires only `MODEL_*` env var changes — no code changes. Production swap to Zalopay's AI model requires only provider credentials and base URL update.

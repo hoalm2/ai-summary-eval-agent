@@ -4,75 +4,65 @@
 
 ---
 
-## What This Is
+## The Problem
 
-The AI Summary Judge is an automated quality-control pipeline for Vietnamese stock-research AI summaries. Every day it receives pre-created summaries from Supabase, then judges each one against the source analyst report using a two-layer check: an LLM judge and a deterministic code-level fact verifier. Results are stored in Supabase and surfaced through a single dashboard endpoint that any stakeholder can open without logging in.
-
-The agent replaces a fully manual PO review workflow (NotebookLM + Claude chat + Excel) that took 15–20 minutes per summary, could not scale, and produced no durable regression history.
-
----
-
-## Problem
-
-**AI Summary** is a feature that automatically compresses analyst reports (PDF) into short bullet summaries for end users. Core risks that must be controlled daily:
+**AI Summary** is a product feature that auto-compresses analyst reports (PDF) into short bullet summaries for retail investors. When the AI gets it wrong, the consequences are direct:
 
 | Risk | Example |
 |---|---|
-| Factual error | Summary says EPS is 2.500 đ; report says 2.200 đ |
-| Fabricated claim | Summary adds a conclusion not in the report |
-| Missing disclaimer | Report says "dự kiến, chưa chắc chắn"; summary drops the caveat |
-| Buy price violation | Summary implies "nên mua ngay" — violates product rules |
+| Factual error | Summary says EPS is 2,500đ; report says 2,200đ |
+| Fabricated claim | Summary adds a conclusion not present in the report |
+| Missing disclaimer | Report says "estimated, not confirmed"; summary drops the caveat |
+| Buy price violation | Summary implies "buy now" — violates product rules |
 
-Manual review does not scale past one reviewer at 15–20 min/summary, and produces no history to detect regressions over time.
+Before this project, catching these issues was fully manual: one PM/PO reviewing each summary with NotebookLM + Claude chat + Excel, taking **15–20 minutes per summary**. That workflow does not scale, produces no regression history, and has no automated guardrail to catch safety violations before they reach users.
+
+---
+
+## The Solution
+
+The AI Summary Judge automates the daily review cycle. It receives pre-created summaries from Supabase, judges each one against the source analyst report using a two-layer check, assigns a final verdict (`PASS` / `FLAG` / `FAIL` / `ERROR`), and surfaces all results in a dashboard the PM/PO can open without logging in.
+
+The pipeline replaces the manual review loop — the PM/PO intervenes only when the dashboard shows a failure that needs investigation.
 
 ---
 
 ## How It Works
 
 ```
-Supabase `reports` + `summaries` tables
-  └─ Stage 0: ensure report_text (DB or PDF extract)
-  └─ fetch pre-existing summary_text
+Supabase `reports` + `summaries`
+  └─ Stage 0: ensure report_text (DB cache or extract from PDF)
         │
         ▼
   Stage 1 — Skeleton Extraction      [LLM: Gemini 3.1 Pro Preview]
-  Extracts: thesis points, key risks,
+  Extracts: thesis, key risks,
   financial highlights, disclaimers
         │
         ▼
   Stage 1b — Citation Alignment      [LLM: Gemini 3.1 Pro Preview]
-  For each summary bullet: finds 1–3
-  verbatim quotes from report as evidence
+  Each summary bullet → 1–3 verbatim
+  quotes from the report as evidence
         │
         ├──────────────────────────────────────┐
         ▼                                      ▼
   Stage 3b — LLM Judge               Stage 3a — Deterministic Factcheck
   [LLM: GPT-5 Mini]                       [code: pipeline/factcheck.py]
-  Input: full report text +          Extracts all numbers / dates
-  skeleton hint + eval checklist     from both texts; flags any
-  Output: blocks[], flags[]          token in summary not in report;
-                                     checks upside % for timestamp
+  Input: full report text +          Token-matches every number/date
+  skeleton hint + eval checklist     in summary vs. report — zero
+  Output: blocks[], flags[]          false negatives on hard numbers
         │                                      │
         └──────────────┬────────────────────────┘
                        ▼
-  Stage 3c — Merge → compute_verdict()
-  → PASS / FLAG / FAIL / ERROR
+  Stage 3c — compute_verdict()   ← deterministic Python, not LLM
+  PASS / FLAG / FAIL / ERROR
                        │
                        ▼
-  Persist to Supabase (`summaries` + `eval_runs`)
-                       │
-                       ▼
-  /dashboard — aggregate metrics + per-summary detail
+  Supabase `eval_runs`  →  /dashboard
 ```
 
+**Why two judge layers?** The LLM judge catches semantic issues — tone escalation, logic conflicts, fabricated claims, missing disclaimers. But it can miss exact numeric discrepancies and occasionally produces false positives. The deterministic factcheck has no false negatives on hard numbers: it token-matches every number and date in the summary against the full report text. The final verdict is always computed by `compute_verdict()` in code — never delegated to LLM discretion.
 
-### Why two judging layers?
-
-The LLM judge catches semantic issues (tone, logic, fabrication, disclaimer omission) but can miss exact numeric discrepancies or produce false positives. The deterministic factcheck has no false negatives on hard numbers: it token-matches every number and date in the summary against the full report text. The final verdict is always computed by code — never left to LLM discretion.
-
-### Why a skeleton extraction step?
-
-Extracting the skeleton first (thesis, risks, financial highlights) and feeding it as a structured hint to Stage 3 reduces bias from the judge re-reading its own extracted context. The skeleton is an auditable artifact: it can be inspected independently, and the judge can be re-run with a different prompt without re-running PDF extraction.
+**Why a skeleton extraction step first?** Extracting thesis, risks, and financial highlights into a structured artifact before judging reduces self-evaluation bias (the judge doesn't re-read its own extracted context). The skeleton is independently auditable and can be inspected separately from the judge output.
 
 ---
 
@@ -80,190 +70,98 @@ Extracting the skeleton first (thesis, risks, financial highlights) and feeding 
 
 | Verdict | Meaning |
 |---|---|
-| `PASS` | No issues found — summary is faithful and within product rules |
-| `FLAG` | One minor issue (truncation, missing caveat, or format) — usable but flagged for review |
-| `FAIL` | At least one BLOCK issue, or two or more FLAG issues — summary must not be published |
-| `ERROR` | System could not evaluate — report text unreadable or judge output unparseable |
+| `PASS` | No issues — summary is faithful and within product rules |
+| `FLAG` | One minor issue (truncation, missing caveat, format) — usable but flagged for review |
+| `FAIL` | At least one BLOCK issue, or ≥ 2 FLAGs — must not be published |
+| `ERROR` | Pipeline could not evaluate — report text unreadable or judge output unparseable |
 
 See [eval-taxonomy.md](eval-taxonomy.md) for the full issue category rubric and disambiguation rules.
 
 ---
 
-## Deployment Context
+## Dashboard — Built Around the PM/PO's Daily Needs
 
-### Contest (deadline 17 June 2026)
+The `/dashboard` HTML endpoint is the primary interface — no login required. Its design is driven by four jobs the PM/PO needs to do every day:
 
-| Item | Value |
-|---|---|
-| Platform | GreenNode AgentBase |
-| Compute | 3 × OpenClaw instances (2 vCPU / 4 GB RAM each) |
-| LLM provider | GreenNode MaaS — OpenAI-compatible endpoint |
-| Storage | Supabase Postgres |
-| Deploy method | GitHub public repo → AgentBase Docker build |
-| Data source | Public analyst report PDFs + seeded demo fixtures |
-| Token budget | 5,000,000 credits ÷ ~6,500 tokens/run ≈ 770 full pipeline runs |
-
-### Production (post-contest, config swap only)
-
-| Item | Change |
-|---|---|
-| LLM provider | Replace `GREENNODE_API_KEY` / `GREENNODE_BASE_URL` with Anthropic Claude API |
-| Data source | Internal DB `summary` + `pdf_path` from daily cron job |
-| Business logic | No changes — same pipeline, prompts, eval checklist, verdict rules |
-
-The design principle is **build once, swap config**: business logic is fully decoupled from provider and infra.
-
----
-
-## Model Selection
-
-Each stage uses a model chosen for its specific requirements. Priority reflects how much a failure at that stage degrades the final eval quality.
-
-| Stage | Name | Model | Reason | Fallback | Priority |
-|---|---|---|---|---|---|
-| 0 | PDF Acquisition | — (no LLM) | Pure text extraction + regex validation | — | N/A |
-| 1 | Skeleton Extraction | `gemini/gemini-3.1-pro-preview` | Largest context window; best document grounding for long Vietnamese PDFs | `qwen3-5-27b` | **HIGH** |
-| 1b | Citation Alignment | `gemini/gemini-3.1-pro-preview` | Must track verbatim quotes from report; same model as Stage 1 for context consistency | `qwen3-5-27b` | **HIGH** |
-| 3a | Deterministic Factcheck | — (no LLM) | Pure regex/token matching — zero hallucination risk | — | N/A |
-| 3b | LLM Judge | `openai/gpt-5-mini` | Critical node — a parse error propagates to ERROR verdict for the whole record | `deepseek/deepseek-v4-pro` | **CRITICAL** |
-| 3c | Merge & Verdict | — (logic code) | `compute_verdict()` is deterministic Python — verdict never delegated to LLM | — | N/A |
-| P | Persist | — (DB write) | Supabase insert/update | — | N/A |
-
-GPT-5 models (`openai/gpt-5-mini`) route through the **Responses API** (non-streaming, `reasoning: medium`). All other LLM calls use GreenNode MaaS Chat Completions. Model swap requires only `MODEL_*` env var changes — no code changes.
-
----
-
-## Dashboard & HTML Report
-
-The `/dashboard` HTML endpoint is the primary interface for PM and stakeholders to monitor AI output quality — no login required. The report design is driven by six Jobs to Be Done (JTBDs).
-
----
-
-### Jobs to Be Done
-
-| # | JTBD | Priority | Value Delivered |
-|---|---|---|---|
-| J1 | **Safety gate** — Know immediately if any summary crossed a product rule (buy price or Type A/B hallucination) before it reaches end users | P0 | Prevents regulatory risk and user trust damage from reaching production |
-| J2 | **Daily health check** — Confirm pass rate ≥ 85% and hallucination rate ≤ 2% in one glance, without reading individual summaries | P0 | Replaces 15–20 min/summary manual review with a single threshold comparison |
-| J3 | **Root cause drill-down** — Navigate from batch → failed summary → failed bullet → source evidence to understand exactly what went wrong | P1 | Cuts root cause investigation from hours to minutes; no need to re-read source PDFs |
-| J4 | **Trend monitoring** — See quality trend across multiple batches to support weekly stakeholder updates | P2 | Enables data-driven model/prompt upgrade decisions; catches regressions early |
-| J5 | **Demo & auditability** — Show concrete pass/fail examples with visible reasoning chains to contest judges or executives | P2 | Makes the eval system auditable and trustworthy to non-technical stakeholders |
-| J6 | **Demo & auditability** — Show concrete pass/fail examples with visible reasoning chains to contest judges or executives | P2 | Makes the eval system auditable and trustworthy to non-technical stakeholders |
-
----
-
-### Design Implications
-
-Each JTBD drives a concrete constraint on the report:
-
-- **J1 → Safety violations appear above the fold.** Buy price issues and Type A/B hallucinations must live in a persistent banner — never buried in a scrollable list. Banner collapses to a green bar when the batch is clean.
-- **J2 → Show threshold gap, not just a number.** Pass rate must show current value vs. the 85% target with a clear color signal. Same for hallucination rate vs. 2% and creation success vs. 98%.
-- **J3 → Three-level navigation is required.** Batch → summary → bullet. Stage 1b (citation alignment) provides the per-bullet evidence citations that make drill-down possible. Without Stage 1b, drill-down stops at the summary level.
-- **J4 → Multi-batch sparkline is required.** A single batch provides no direction signal. Minimum 7 batches of pass rate history for the trend line to be meaningful.
-- **J5 → Judge reasoning must be readable inline.** The `rationale` field from the LLM judge and `explanation` from the deterministic factcheck must be visible without opening a separate modal. Skeleton JSON and bullet citations are expandable in place.
-
----
-
-### Report Structure
-
-Six sections in priority order — higher sections are always visible without scrolling:
-
-#### Section 1 — Safety Alert Banner *(J1)*
-
-Red banner if any eval run in the batch contains `buy_price_*`, `A_*`, or `B_*` BLOCK issues. Shows a general risk summary only (e.g. "Batch contains safety violations — do not publish until reviewed") — does not expose specific tickers or issue category names. Collapses to a green "No safety violations" bar when the batch is clean.
-
-#### Section 2 — Quality Threshold Dashboard *(J2)*
-
-Four metric cards, each showing current value vs. target threshold with color coding:
-
-| Metric | Target | Source |
+| # | Job | Why it matters |
 |---|---|---|
-| Pass rate | ≥ 85% | eval_runs.verdict counts |
-| Hallucination rate | ≤ 2% | runs with any A_* or B_* block (excl. B_tone_escalation) ÷ total |
-| Buy violations | 0 | runs with any buy_price_* block |
-| Creation success rate | ≥ 98% | (total − ERROR) ÷ total |
+| J1 | **Safety gate** — know immediately if any summary crossed a product rule (buy price or Type A/B hallucination) | Prevents safety violations from reaching users |
+| J2 | **Daily health check** — confirm pass/fail rates are within threshold in one glance, without reading individual summaries | Replaces the 15–20 min/summary manual review |
+| J3 | **Root cause drill-down** — navigate from batch → failed summary → failed bullet → source evidence | Cuts investigation time from hours to minutes |
+| J4 | **Trend monitoring** — see quality direction across multiple batches | Enables data-driven decisions on model/prompt upgrades |
 
-#### Section 3 — Failure Pattern Analysis *(J4)*
+These four jobs map directly to what the dashboard shows:
 
-Top failure types ranked by frequency this batch. For each type:
-- Count and % of total failures
-- Suggested fix: specific prompt file or workflow step responsible, with a concrete change recommendation
-
-#### Section 4 — Latest Eval Runs *(J3)*
-
-Filterable list (by verdict, ticker, date range). Each row shows:
-- Verdict badge (PASS / FLAG / FAIL / ERROR)
-
-- Ticker + report date
-- Expandable issue list: per-bullet breakdown with issue category, summary quote, source evidence citation from Stage 1b
-
-#### Section 5 — Historical Trend *(J5)*
-
-Pass rate sparkline over last N batches. Shows 7-batch moving average and flags any batch below the 85% threshold.
-
-#### Section 6 — Walk-through Examples *(J6)*
-
-One PASS and one FAIL example with all reasoning expanded: skeleton JSON, per-bullet evidence citations, LLM judge rationale, deterministic factcheck findings. Intended for contest demo and stakeholder audit.
-
----
+- **5 metric cards** (J1 + J2) — each card shows current value vs. target threshold with color coding: % Summary Fail (≤ 2%), Hallucination rate (≤ 2%), Buy violations (= 0), Format compliance (≥ 95%), % Fail/Flag bullets (≤ 10%). Clicking a card filters the detail view to that issue type.
+- **Overview tab** (J2) — failure pattern breakdown by issue type + latest batch summary table
+- **Detailed report tab** (J3) — per-summary drill-down: verdict badge → issue list → explanation → summary quote → expandable verbatim report evidence; filterable by verdict, ticker, date
+- **Trend tab** (J4) — % Summary Fail over time (7-day window, 15% threshold line)
 
 Full `report_text` is never exposed in any endpoint.
 
 ---
 
-## Token Budget
+## Design Decisions
 
-| Stage | Model | Estimated tokens |
-|---|---|---|
-| Stage 1 — skeleton | Gemini 3.1 Pro Preview | ~4,600 (long PDF input + JSON output) |
-| Stage 1b — alignment | Gemini 3.1 Pro Preview | ~5,000 (report + summary → bullet citations) |
-| Stage 3b — judge | GPT-5 Mini | ~5,700 (report + skeleton + checklist) |
-| **Total per record** | | **~15,300** |
+The jobs above — and the pipeline reliability goal of never leaving verdict authority to an LLM — drove these decisions:
 
-### QC strategy — do not burn tokens before validation
+| Decision | How it serves the goals |
+|---|---|
+| Separate skeleton extraction before judging (Stage 1) | Prevents self-evaluation bias; skeleton is independently auditable (J3) |
+| Deterministic factcheck alongside LLM judge (Stage 3a + 3b) | LLM alone misses exact numeric discrepancies; code-level token match has no false negatives — critical for J1 safety gate |
+| Three-verdict system + ERROR | Binary pass/fail loses signal; Likert 1–5 is hard to calibrate for a solo reviewer; ERROR separates operational failures from quality failures (J2) |
+| `compute_verdict()` in code is the sole authority | Verdict is never delegated to LLM — consistent, auditable, no prompt-drift risk |
+| Stage 1b citation alignment | Provides the per-bullet evidence citations that make J3 drill-down possible; without it, investigation stops at summary level |
+| Supabase Postgres as storage | Durable, queryable history for J4 trend monitoring; avoids flat-file edge cases on container restarts |
+| Prompts in `/prompts/*.md`, separate from code | Prompt changes do not require code changes — independently versioned and iterable |
 
-1. **Development:** run with `MOCK_LLM_MODE=true` — Supabase and dashboard still run for real, LLM calls are mocked. Zero GreenNode tokens.
-2. **First cloud deploy:** keep `MOCK_LLM_MODE=true`; verify health, status, and dashboard with seeded fixtures.
-3. **First real validation:** set `MOCK_LLM_MODE=false` and process exactly **one** report. Inspect the eval run manually before expanding.
-4. **Human calibration:** PO reviews 5 verdicts to confirm judge quality before running the full demo batch.
+---
 
-Never run multi-report GreenNode loops until prompts have been validated manually first.
+## Model Selection
+
+Each stage uses a model chosen for its specific failure mode risk. Priority reflects how much a failure at that stage degrades the final verdict.
+
+| Stage | Model | Reason | Fallback | Priority |
+|---|---|---|---|---|
+| 0 — PDF Acquisition | *(no LLM)* | Pure text extraction + regex validation | — | N/A |
+| 1 — Skeleton | `gemini/gemini-3.1-pro-preview` | Largest context window; best document grounding for long Vietnamese PDFs | `qwen3-5-27b` | **HIGH** |
+| 1b — Citation | `gemini/gemini-3.1-pro-preview` | Must track verbatim quotes from report; same model as Stage 1 for context consistency | `qwen3-5-27b` | **HIGH** |
+| 3a — Factcheck | *(no LLM)* | Pure regex/token matching — zero hallucination risk | — | N/A |
+| 3b — Judge | `openai/gpt-5-mini` | Critical node — a parse error propagates to ERROR verdict for the whole record | `deepseek/deepseek-v4-pro` | **CRITICAL** |
+| 3c — Verdict | *(logic code)* | `compute_verdict()` is deterministic Python — verdict never delegated to LLM | — | N/A |
+
+GPT-5 models route through the **Responses API** (non-streaming, `reasoning: medium`). All other LLM calls use Chat Completions. Model swap requires only `MODEL_*` env var changes — no code changes.
+
+---
+
+## Production Path
+
+The pipeline is built on a **build-once, swap-config** principle: business logic, prompts, eval checklist, and verdict rules are fully decoupled from provider and data source. Moving to production requires only:
+
+- Point `MODEL_*` env vars at the Zalopay-provided AI model
+- Point the data source at the internal DB that already holds pre-created summaries and their source PDFs
+- Enable a scheduled daily trigger instead of the manual `/run-daily` call
+
+No changes to pipeline stages, judging logic, or dashboard.
 
 ---
 
 ## Launch Criteria
 
-Criteria are fixed before review — not adjusted after results are in.
+Fixed before review — not adjusted after results are in:
 
-- Pass rate ≥ 85% on full launch sample
+- Pass rate ≥ 95% on full launch sample
 - Zero Type A or Type B hallucinations on adversarial sample
 - Buy violation count = 0
 - Demo sample includes ≥ 5 report/summary pairs with at least 1–2 intentional failures
 
 ---
 
-## Key Design Decisions
+## Guiding Principles
 
-| Decision | Rationale |
-|---|---|
-| Separate skeleton extraction (Stage 1) before judging | Prevents self-evaluation bias; skeleton is an independently auditable artifact |
-| Deterministic factcheck alongside LLM judge | LLM alone misses exact numeric discrepancies; code-level token match has no false negatives on numbers and dates |
-| Three-verdict system + ERROR | Binary pass/fail loses signal; Likert 1–5 is hard to calibrate for a solo reviewer; ERROR distinguishes operational failures from quality failures |
-| `compute_verdict()` in code is the authority | Verdict is never delegated to LLM discretion; consistent and auditable |
-| Supabase Postgres as storage | Durable, queryable history; avoids flat-file persistence edge cases with Docker restarts |
-| Sequential batch processing | 3 × 4 GB RAM instances insufficient for parallel PDF parsing |
-| `MOCK_LLM_MODE=true` as development default | Prevents accidental token burn; all Supabase and dashboard behavior still runs for real |
-| Prompts in `/prompts/*.md`, separate from code | Prompt changes do not require code changes; independently versioned |
-| Single HTML endpoint for dashboard | No extra infra; contest judges and PO can see output immediately |
-
----
-
-## Out of Scope (Contest)
-
-- Internal company DB integration or private/PII data
-- Dashboard authentication or multi-tenant access
-- Real-time streaming output
-- Parallel batch processing
-- Email / Slack alerts
-- Complex retry orchestration
-- Scheduled cron trigger (manual `/run-daily` trigger for contest demo)
+- **Source report is ground truth.** The system judges summary faithfulness, not whether the report itself is correct.
+- **Skeleton is an audit checkpoint, not authority.** If skeleton and full report conflict, the full report wins.
+- **Avoid double-hallucination.** Use full report text, deterministic checks, and code-computed verdicts instead of relying only on one LLM judge.
+- **Token-safe by default.** Use `MOCK_LLM_MODE=true` during development and only run real LLM calls on tightly scoped validation.
+- **Build once, swap config.** Keep business logic independent from deployment infra and future model/provider changes.
+- **Demo before scale.** Prove correctness on fixtures and a small cloud run before expanding to full batches.

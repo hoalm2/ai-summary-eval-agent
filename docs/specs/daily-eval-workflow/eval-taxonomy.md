@@ -187,3 +187,18 @@ Each failure mode is caught by one of two mechanisms — **Deterministic** (rule
 | **Role** | Safety net for hallucinated figures and prohibited upside claims | Primary evaluator for the majority of failure modes |
 
 The deterministic layer is designed to be a **strict lower bound** — if it fires, the summary fails regardless of what the LLM judge says. The LLM judge then adds coverage for everything beyond token-level matching.
+
+---
+
+## Product Quality Thresholds
+
+How issue categories roll up into production monitoring metrics on the dashboard:
+
+| Dashboard metric | Target | Issue categories that count toward it |
+|---|---|---|
+| **Hallucination rate** | ≤ 2% of evaluated summaries | `A_factual`, `A_logic_causal_wrong`, `A_logic_causal_fabricated`, `A_logic_temporal`, `B_unsupported`, `B_fabricated_conclusion` — excludes `B_tone_escalation` |
+| **Buy violations** | 0 | `buy_price_absolute`, `buy_price_upside`, `buy_price_timing` |
+| **Format compliance** | ≥ 95% of evaluated summaries | `format`, `render` FLAG issues |
+| **Eval pipeline success** | ≥ 98% | `ERROR` verdict rate — report text readable + judge output parseable |
+
+> `B_tone_escalation` is a BLOCK issue (causes FAIL) but is tracked separately from the hallucination rate because it reflects confidence inflation, not a factual or logical error.
