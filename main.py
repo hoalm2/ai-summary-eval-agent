@@ -399,8 +399,8 @@ def import_reports(payload: ReportImportRequest, x_demo_token: str | None = Head
         if report_text and len(report_text.strip()) < get_settings().report_text_min_chars:
             raise HTTPException(status_code=400, detail="report_text is too short for reliable evaluation")
         existing = store.find_existing_report(
-            ticker=report_payload["ticker"],
-            report_date=report_payload["report_date"],
+            ticker=report_payload.get("ticker"),
+            report_date=None,
             source_pdf_url=source_pdf_url,
         )
         if existing and payload.skip_existing:
