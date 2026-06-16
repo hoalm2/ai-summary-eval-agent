@@ -1680,6 +1680,51 @@ function filterAndDetail(opts) {
   switchTab('detail');
 }
 
+/* ═══════════════════ PAGE ENTRANCE ═══════════════════ */
+function countUp(el, target, suffix, dur) {
+  if (target === 0) return;
+  var t0 = performance.now();
+  (function tick(now) {
+    var p = Math.min((now - t0) / dur, 1);
+    var eased = 1 - Math.pow(1 - p, 3); // easeOutCubic
+    el.textContent = Math.round(eased * target) + suffix;
+    if (p < 1) requestAnimationFrame(tick);
+  })(performance.now());
+}
+
+function runPageEntrance() {
+  var hdr = document.querySelector('.hdr');
+  var cnt = document.querySelector('.content');
+  // Prepare starting states
+  if (hdr) { hdr.style.opacity = '0'; hdr.style.transition = 'none'; }
+  if (cnt) { cnt.style.opacity = '0'; cnt.style.transition = 'none'; }
+  [0,1,2,3,4].forEach(function(i) {
+    var mc = document.getElementById('mc' + i);
+    if (mc) { mc.style.opacity = '0'; mc.style.transform = 'translateY(20px)'; mc.style.transition = 'none'; }
+  });
+  // Double rAF: ensure opacity:0 is painted before starting transitions
+  requestAnimationFrame(function() { requestAnimationFrame(function() {
+    if (hdr) { hdr.style.transition = 'opacity .5s ease'; hdr.style.opacity = '1'; }
+    if (cnt) {
+      setTimeout(function() { cnt.style.transition = 'opacity .6s ease'; cnt.style.opacity = '1'; }, 220);
+    }
+    [0,1,2,3,4].forEach(function(i) {
+      var mc = document.getElementById('mc' + i);
+      if (!mc) return;
+      var valEl = mc.querySelector('.mc-value');
+      var raw = valEl ? valEl.textContent.trim() : '';
+      var isPct = raw.slice(-1) === '%';
+      var num = parseInt(raw, 10);
+      setTimeout(function() {
+        mc.style.transition = 'opacity .45s ease, transform .5s cubic-bezier(.22,1,.36,1)';
+        mc.style.opacity = '1';
+        mc.style.transform = 'translateY(0)';
+        if (valEl && !isNaN(num)) countUp(valEl, num, isPct ? '%' : '', 860);
+      }, 80 + i * 100);
+    });
+  }); });
+}
+
 /* ═══════════════════ INIT ═══════════════════ */
 (function init() {
   renderMetrics(AGG);
@@ -1697,6 +1742,9 @@ function filterAndDetail(opts) {
   document.getElementById('fCategory').addEventListener('change', applyFilters);
   document.getElementById('fSymbol').addEventListener('input', applyFilters);
   document.getElementById('fDate').addEventListener('change', applyFilters);
+
+  // Fire entrance if onboarding already seen (otherwise finish() triggers it)
+  if (!document.getElementById('ob-curtain')) runPageEntrance();
 })();"""
 
     head = (
@@ -1789,6 +1837,9 @@ function filterAndDetail(opts) {
     overlay.style.display = 'none';
     replay.style.display = '';
     try { localStorage.setItem(STORAGE_KEY, '1'); } catch(e){}
+    var curtain = document.getElementById('ob-curtain');
+    if (curtain) curtain.parentNode.removeChild(curtain);
+    if (typeof runPageEntrance === 'function') runPageEntrance();
   }
 
   nextBtn.addEventListener('click', function(){
@@ -1909,10 +1960,16 @@ function filterAndDetail(opts) {
   var seen = false;
   try { seen = !!localStorage.getItem(STORAGE_KEY); } catch(e){}
   if (!seen) {
+    // Hide dashboard behind onboarding; entrance fires when onboarding closes
+    var _c = document.createElement('style');
+    _c.id = 'ob-curtain';
+    _c.textContent = '.hdr,.content{opacity:0!important;transition:none!important}';
+    document.head.appendChild(_c);
     overlay.style.display = '';
     render(1);
   } else {
     replay.style.display = '';
+    // entrance fires from init() below
   }
 })();
 </script>"""
