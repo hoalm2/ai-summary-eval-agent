@@ -56,7 +56,6 @@ def main() -> None:
                 "ticker": ticker,
                 "report_date": report_date or None,
                 "source_pdf_url": source_pdf_url,
-                "pdf_storage_path": None,
                 "report_text": report_text,
                 "status": "ready",
             }

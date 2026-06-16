@@ -46,7 +46,7 @@ Supabase `reports` + `summaries`
         ├──────────────────────────────────────┐
         ▼                                      ▼
   Stage 3b — LLM Judge             Stage 3a — Deterministic Factcheck
-  [LLM: Gemini 3.1 Pro Preview]        [code: pipeline/factcheck.py]
+  [LLM: Claude Sonnet 4.6]             [code: pipeline/factcheck.py]
   Input: full report + skeleton        Token-matches every number/date
   + eval checklist                     in summary vs. report — zero
   Output: blocks[], flags[]            false negatives on hard numbers
@@ -85,7 +85,7 @@ Full rubric → [docs/specs/daily-eval-workflow/eval-taxonomy.md](docs/specs/dai
 | 1 — Skeleton | `gemini/gemini-3.1-pro-preview` | Largest context window; best document grounding for long Vietnamese PDFs | `qwen3-5-27b` | HIGH |
 | 1b — Citation | `gemini/gemini-3.1-pro-preview` | Must track verbatim quotes; same model as Stage 1 for context consistency | `qwen3-5-27b` | HIGH |
 | 3a — Factcheck | *(no LLM)* | Pure regex/token matching — zero hallucination risk | — | N/A |
-| 3b — Judge | `gemini/gemini-3.1-pro-preview` | Critical node — a parse error propagates to ERROR verdict for the whole record | `deepseek/deepseek-v4-pro` | CRITICAL |
+| 3b — Judge | `claude-sonnet-4-6` | Critical node — a parse error propagates to ERROR verdict for the whole record; Anthropic SDK used directly | `deepseek/deepseek-v4-pro` | CRITICAL |
 | 3c — Verdict | *(logic code)* | `compute_verdict()` is deterministic Python — verdict never delegated to LLM | — | N/A |
 
 Model swap requires only `MODEL_*` env var changes — no code changes.

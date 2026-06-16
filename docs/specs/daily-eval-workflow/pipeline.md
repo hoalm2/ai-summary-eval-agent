@@ -212,8 +212,8 @@ FactcheckResult(
 ### 3b — LLM Judge
 
 **Prompt:** `prompts/eval_judge.md`  
-**Model:** `settings.model_judge` (default: `gemini/gemini-3.1-pro-preview`)  
-**LLM call type:** `json_chat` via Chat Completions (JSON mode when `GREENNODE_JSON_MODE=true`)  
+**Model:** `settings.model_judge` (default: `claude-sonnet-4-6`)  
+**LLM call type:** `chat_anthropic` via Anthropic SDK  
 **Max tokens:** `settings.judge_max_tokens`
 
 #### Input (user prompt structure)
@@ -343,10 +343,10 @@ Controlled by `MOCK_LLM_MODE` env var (default `true`).
 |---|---|---|
 | Stage 1 LLM call | Returns fixed skeleton JSON, 0 tokens | Calls GreenNode `gemini/gemini-3.1-pro-preview` |
 | Stage 1b LLM call | Returns single placeholder bullet, 0 tokens | Calls GreenNode `gemini/gemini-3.1-pro-preview` |
-| Stage 3b LLM judge | Keyword-matches summary for `buy_price_timing`, `B_tone_escalation`, `A_logic_temporal`, `C_disclaimer_omission` | Calls GreenNode `gemini/gemini-3.1-pro-preview` via Chat Completions |
+| Stage 3b LLM judge | Keyword-matches summary for `buy_price_timing`, `B_tone_escalation`, `A_logic_temporal`, `C_disclaimer_omission` | Calls Anthropic `claude-sonnet-4-6` via Anthropic SDK |
 | Deterministic factcheck | Runs normally (no LLM) | Runs normally |
 | Supabase reads/writes | Real | Real |
-| `summary_model` value saved | `"mock_llm"` | Model name (e.g. `"gemini/gemini-3.1-pro-preview"`) |
+| `summary_model` value saved | `"mock_llm"` | Model name (e.g. `"claude-sonnet-4-6"`) |
 
 The mock judge uses the following keyword triggers for test coverage:
 

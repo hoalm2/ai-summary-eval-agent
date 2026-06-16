@@ -21,7 +21,6 @@ class ImportPayloadTest(unittest.TestCase):
                 "ticker": "FRT",
                 "report_date": None,
                 "source_pdf_url": "https://cdn.simplize.vn/simplizevn/report/FRT/report.pdf",
-                "pdf_storage_path": None,
                 "report_text": None,
                 "status": "pending",
             },

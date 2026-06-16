@@ -27,7 +27,6 @@ Stores analyst report metadata and text. Populated via `POST /reports/import`.
 | `ticker` | text | Yes | Stock ticker (e.g. `"VTP"`) |
 | `report_date` | date | Yes | Report publication date |
 | `source_pdf_url` | text | Yes | Public PDF URL; host must be in `ALLOWED_PDF_HOSTS` |
-| `pdf_storage_path` | text | Yes | Local path inside `data/`; used as fallback |
 | `report_text` | text | Yes | Full extracted text; populated on import or on-demand PDF extraction |
 | `status` | text | No | See status values below |
 | `created_at` | timestamptz | No | Auto-set by Supabase |

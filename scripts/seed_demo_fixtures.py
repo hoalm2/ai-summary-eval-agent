@@ -59,7 +59,6 @@ def main() -> None:
                 "ticker": fixture["ticker"],
                 "report_date": fixture["report_date"],
                 "source_pdf_url": None,
-                "pdf_storage_path": None,
                 "report_text": fixture["report_text"],
                 "status": "ready",
             }

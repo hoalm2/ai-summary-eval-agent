@@ -15,33 +15,6 @@ Không thêm `summary_text` vào `reports` và không drop bảng `summaries`. B
 
 ---
 
-## Bước 1 — Chạy migration SQL (chỉ làm 1 lần)
-
-Vào **Supabase Dashboard → SQL Editor**, chạy:
-
-```sql
-alter table reports
-  add column if not exists external_id   bigint,
-  add column if not exists ticker_name   text,
-  add column if not exists industry_name text,
-  add column if not exists report_type   integer,
-  add column if not exists source        text,
-  add column if not exists title         text,
-  add column if not exists file_name     text,
-  add column if not exists target_price  bigint,
-  add column if not exists recommend     text;
-
-create unique index if not exists idx_reports_external_id
-  on reports(external_id)
-  where external_id is not null;
-```
-
-Ghi chú:
-
-- Không cần thêm cột `summary_text` vào `reports`.
-- Không drop bảng `summaries`.
-- Đảm bảo bảng `summaries` đã tồn tại theo `supabase_schema.sql`.
-
 ---
 
 ## Bước 2 — Lấy JSON từ API Simplize
@@ -163,20 +136,11 @@ Behavior cần giữ:
 
 | JSON field | Cột trong `reports` | Ghi chú |
 |---|---|---|
-| `id` | `external_id` | ID từ Simplize (bigint) |
 | `ticker` | `ticker` | |
-| `ticker_name` | `ticker_name` | |
-| `industry_name` | `industry_name` | |
-| `report_type` | `report_type` | |
-| `source` | `source` | Tên CTCK |
 | `issue_date` | `report_date` | DD/MM/YYYY → YYYY-MM-DD tự động |
-| `title` | `title` | |
 | `attached_link` | `source_pdf_url` | URL PDF để Stage 0 fetch |
-| `file_name` | `file_name` | |
-| `target_price` | `target_price` | |
-| `recommend` | `recommend` | |
 | — | `status` | Set `"pending"` (default) |
-| `issue_date_time_ago` | — | Không lưu (derived field) |
+| `id`, `ticker_name`, `industry_name`, `report_type`, `source`, `title`, `file_name`, `target_price`, `recommend`, `issue_date_time_ago` | — | Không lưu (cột metadata không dùng trong eval pipeline) |
 
 ### Summary fields → `summaries`
 

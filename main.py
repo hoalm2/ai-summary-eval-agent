@@ -1088,6 +1088,113 @@ hr.d-rule { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
   .metrics { grid-template-columns: 1fr; }
   .ov-grid, .split { grid-template-columns: 1fr; }
 }
+
+/* ── Onboarding ─────────────────────────────────────────────────────── */
+@keyframes ob-fadeIn { from { opacity:0 } to { opacity:1 } }
+@keyframes ob-slideUp { from { opacity:0; transform:translateY(20px) } to { opacity:1; transform:translateY(0) } }
+@keyframes ob-popIn { 0%{opacity:0;transform:scale(.92)} 60%{transform:scale(1.02)} 100%{opacity:1;transform:scale(1)} }
+@keyframes ob-slideR { from{opacity:0;transform:translateX(32px)} to{opacity:1;transform:translateX(0)} }
+@keyframes ob-slideL { from{opacity:0;transform:translateX(-32px)} to{opacity:1;transform:translateX(0)} }
+@keyframes ob-drawBar { from{transform:scaleY(0)} to{transform:scaleY(1)} }
+@keyframes ob-dash { to{stroke-dashoffset:0} }
+@media (prefers-reduced-motion:reduce) {
+  .ob-overlay, .ob-modal, .ob-slide * { animation:none !important; }
+}
+.ob-overlay {
+  position:fixed; inset:0; z-index:9000;
+  background:rgba(8,20,18,.52); backdrop-filter:blur(4px);
+  display:flex; align-items:center; justify-content:center; padding:24px;
+  animation:ob-fadeIn .3s both;
+}
+.ob-modal {
+  position:relative; width:min(940px,94vw);
+  background:#fff; border-radius:22px;
+  box-shadow:0 40px 100px -20px rgba(8,40,35,.4), 0 0 0 1px #e4ece9;
+  overflow:hidden; animation:ob-popIn .4s both;
+}
+.ob-skip {
+  position:absolute; top:18px; right:20px; z-index:2;
+  border:none; background:transparent; color:#5b7873;
+  font:500 14px/1 'Inter',sans-serif; cursor:pointer; padding:6px 10px;
+}
+.ob-skip:hover { color:#0b1f1d; }
+.ob-stage { min-height:420px; padding:52px 52px 10px; position:relative; overflow:hidden; }
+.ob-slide { }
+.ob-kicker {
+  display:inline-flex; align-items:center; gap:8px;
+  font:600 13px/1 'Inter',sans-serif; letter-spacing:.11em; text-transform:uppercase;
+  color:#1e9e54; margin-bottom:16px;
+  animation:ob-slideUp .5s .05s both;
+}
+.ob-kicker-dot {
+  width:8px; height:8px; border-radius:50%; background:#1e9e54;
+  box-shadow:0 0 0 4px #eaf5ef;
+}
+.ob-h1 {
+  font:900 58px/1.05 'Inter',sans-serif; letter-spacing:-.03em;
+  color:#0b1f1d; margin-bottom:18px;
+  animation:ob-slideUp .6s .12s both;
+}
+.ob-h2 {
+  font:800 38px/1.12 'Inter',sans-serif; letter-spacing:-.025em;
+  color:#0b1f1d; margin-bottom:14px;
+  animation:ob-slideUp .6s .12s both;
+}
+.ob-grad {
+  background:linear-gradient(120deg,#0b514b,#1e9e54 70%,#0d9488);
+  -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+}
+.ob-lead {
+  font:400 18px/1.6 'Inter',sans-serif; color:#5b7873; max-width:700px; margin-bottom:6px;
+  animation:ob-slideUp .6s .22s both;
+}
+/* slide 1 flow */
+.ob-flow { display:flex; align-items:center; gap:6px; margin-top:34px; flex-wrap:nowrap; animation:ob-fadeIn .6s .4s both; }
+.ob-flow-node { display:flex; flex-direction:column; align-items:center; gap:9px; flex:0 0 auto; }
+.ob-flow-icon {
+  width:70px; height:70px; border-radius:16px; background:#eaf5ef; border:1px solid #e4ece9;
+  display:flex; align-items:center; justify-content:center; font-size:28px;
+}
+.ob-flow-label { font:600 13px/1 'Inter',sans-serif; color:#0b1f1d; }
+.ob-flow-arrow { color:#1e9e54; font-size:22px; font-weight:700; flex:1 1 auto; text-align:center; animation:ob-fadeIn .4s .62s both; }
+/* slide 2 benefits */
+.ob-benefit-row { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-top:30px; animation:ob-fadeIn .5s .3s both; }
+.ob-benefit-card { background:#fafdfc; border:1px solid #e4ece9; border-radius:14px; padding:22px 20px; }
+.ob-benefit-icon { font-size:28px; margin-bottom:12px; }
+.ob-benefit-title { font:700 17px/1 'Inter',sans-serif; color:#0b1f1d; margin-bottom:8px; }
+.ob-benefit-desc { font:400 14px/1.55 'Inter',sans-serif; color:#5b7873; }
+/* slide 3 features */
+.ob-feat-row { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-top:26px; }
+.ob-feat-card { background:#fafdfc; border:1px solid #e4ece9; border-radius:14px; padding:20px 18px; min-height:220px; }
+.ob-feat-head { display:flex; align-items:center; gap:10px; font:700 16px/1 'Inter',sans-serif; color:#0b1f1d; margin-bottom:10px; }
+.ob-feat-num { font:700 12px/1 'JetBrains Mono',monospace; padding:3px 7px; border-radius:7px; }
+.ob-feat-body { font:400 13px/1.5 'Inter',sans-serif; color:#5b7873; margin-bottom:4px; }
+.ob-mini-bars { display:flex; align-items:flex-end; gap:6px; height:68px; margin-top:14px; }
+.ob-mini-bar { flex:1; border-radius:5px 5px 0 0; background:linear-gradient(#1e9e54,#0b514b); transform-origin:bottom; }
+.ob-rows { display:flex; flex-direction:column; gap:7px; margin-top:12px; }
+.ob-mini-row { display:flex; align-items:center; justify-content:space-between; background:#fff; border:1px solid #e4ece9; border-radius:9px; padding:7px 11px; }
+.ob-mini-row-id { font:400 12px/1 'JetBrains Mono',monospace; color:#5b7873; }
+.ob-mini-row-tag { font:700 11px/1 'Inter',sans-serif; padding:2px 8px; border-radius:100px; }
+/* footer */
+.ob-footer { display:flex; align-items:center; justify-content:space-between; padding:18px 30px 24px; border-top:1px solid #e4ece9; margin-top:6px; }
+.ob-dots { display:flex; gap:7px; }
+.ob-dot { width:9px; height:9px; border-radius:100px; border:none; background:#cfe0db; cursor:pointer; padding:0; transition:width .3s,background .3s; }
+.ob-dot.active { width:28px; background:#1e9e54; }
+.ob-nav { display:flex; gap:9px; }
+.ob-btn-ghost { border:1px solid #e4ece9; background:#fff; color:#0b1f1d; font:600 14px/1 'Inter',sans-serif; padding:10px 20px; border-radius:11px; cursor:pointer; }
+.ob-btn-ghost:hover { border-color:#0b514b; }
+.ob-btn-primary {
+  border:none; background:linear-gradient(120deg,#0b514b,#1e9e54);
+  color:#fff; font:600 14px/1 'Inter',sans-serif; padding:10px 24px;
+  border-radius:11px; cursor:pointer; box-shadow:0 8px 18px -6px rgba(11,81,75,.4);
+}
+.ob-btn-primary:hover { opacity:.92; }
+.ob-replay {
+  position:fixed; bottom:22px; right:22px; z-index:8999;
+  border:1px solid #e4ece9; background:#fff; color:#0b514b;
+  font:600 13px/1 'Inter',sans-serif; padding:9px 16px;
+  border-radius:100px; cursor:pointer; box-shadow:0 6px 16px -8px rgba(8,40,35,.35);
+}
 </style>"""
 
     html_body = """
@@ -1599,9 +1706,218 @@ function filterAndDetail(opts) {
 
     body = html_body.replace("HEADER_META_PLACEHOLDER", header_meta)
 
+    onboarding_html = """
+<!-- ── Onboarding overlay ───────────────────────────────────────────── -->
+<div id="obOverlay" class="ob-overlay" role="dialog" aria-modal="true" aria-label="Giới thiệu AI Summary Judge" style="display:none">
+  <div class="ob-modal">
+    <button class="ob-skip" id="obSkip">Bỏ qua ✕</button>
+    <div class="ob-stage" id="obStage"></div>
+    <div class="ob-footer">
+      <div class="ob-dots" id="obDots"></div>
+      <div class="ob-nav">
+        <button class="ob-btn-ghost" id="obBack" style="display:none">Quay lại</button>
+        <button class="ob-btn-primary" id="obNext">Tiếp tục →</button>
+      </div>
+    </div>
+  </div>
+</div>
+<button class="ob-replay" id="obReplay" style="display:none">↻ Xem lại giới thiệu</button>
+
+<script>
+(function(){
+  var STORAGE_KEY = 'aij_onboarding_done';
+  var slides = [
+    function(dir){ return slide1(dir); },
+    function(dir){ return slide2(dir); },
+    function(dir){ return slide3(dir); },
+  ];
+  var cur = 0;
+  var overlay = document.getElementById('obOverlay');
+  var stage   = document.getElementById('obStage');
+  var dotsEl  = document.getElementById('obDots');
+  var backBtn = document.getElementById('obBack');
+  var nextBtn = document.getElementById('obNext');
+  var skipBtn = document.getElementById('obSkip');
+  var replay  = document.getElementById('obReplay');
+
+  function buildDots() {
+    dotsEl.innerHTML = '';
+    slides.forEach(function(_, i) {
+      var d = document.createElement('button');
+      d.className = 'ob-dot' + (i === cur ? ' active' : '');
+      d.setAttribute('aria-label', 'Slide ' + (i+1));
+      d.addEventListener('click', function(){ go(i); });
+      dotsEl.appendChild(d);
+    });
+  }
+
+  function render(dir) {
+    stage.innerHTML = slides[cur](dir);
+    buildDots();
+    backBtn.style.display = cur > 0 ? '' : 'none';
+    nextBtn.textContent = cur === slides.length - 1 ? 'Bắt đầu →' : 'Tiếp tục →';
+    // trigger bar animations after paint
+    requestAnimationFrame(function(){
+      stage.querySelectorAll('.ob-mini-bar').forEach(function(el, i){
+        el.style.animation = 'ob-drawBar .5s ' + (0.5 + i*0.07) + 's both';
+      });
+      stage.querySelectorAll('.ob-flow-node').forEach(function(el, i){
+        el.style.animation = 'ob-popIn .5s ' + (0.5 + i*0.12) + 's both';
+      });
+      stage.querySelectorAll('.ob-mini-row').forEach(function(el, i){
+        el.style.animation = 'ob-slideR .45s ' + (0.5 + i*0.1) + 's both';
+      });
+      stage.querySelectorAll('.ob-benefit-card').forEach(function(el, i){
+        el.style.animation = 'ob-slideUp .5s ' + (0.36 + i*0.12) + 's both';
+      });
+      stage.querySelectorAll('.ob-feat-card').forEach(function(el, i){
+        el.style.animation = 'ob-slideUp .5s ' + (0.26 + i*0.12) + 's both';
+      });
+    });
+  }
+
+  function go(n) {
+    var dir = n >= cur ? 1 : -1;
+    cur = Math.max(0, Math.min(slides.length - 1, n));
+    render(dir);
+  }
+
+  function finish() {
+    overlay.style.display = 'none';
+    replay.style.display = '';
+    try { localStorage.setItem(STORAGE_KEY, '1'); } catch(e){}
+  }
+
+  nextBtn.addEventListener('click', function(){
+    if (cur === slides.length - 1) finish();
+    else go(cur + 1);
+  });
+  backBtn.addEventListener('click', function(){ go(cur - 1); });
+  skipBtn.addEventListener('click', finish);
+  replay.addEventListener('click', function(){
+    cur = 0;
+    replay.style.display = 'none';
+    overlay.style.display = '';
+    render(1);
+  });
+  overlay.addEventListener('click', function(e){ if (e.target === overlay) finish(); });
+  document.addEventListener('keydown', function(e){
+    if (overlay.style.display === 'none') return;
+    if (e.key === 'ArrowRight') { if (cur < slides.length-1) go(cur+1); else finish(); }
+    else if (e.key === 'ArrowLeft') { if (cur > 0) go(cur-1); }
+    else if (e.key === 'Escape') finish();
+  });
+
+  // ── Slide templates ──────────────────────────────────────────────────
+  function anim(dir) { return dir > 0 ? 'ob-slideR .45s both' : 'ob-slideL .45s both'; }
+
+  function slide1(dir) {
+    return '<div class="ob-slide" style="animation:' + anim(dir) + '">'
+      + '<div class="ob-kicker"><span class="ob-kicker-dot"></span> Gi&#7899;i thi&#7879;u</div>'
+      + '<h1 class="ob-h1"><span>AI Summary </span><span class="ob-grad">Judge</span></h1>'
+      + '<p class="ob-lead">Pipeline t&#7921; &#273;&#7897;ng ki&#7875;m so&#225;t ch&#7845;t l&#432;&#7907;ng b&#7843;n t&#243;m t&#7855;t AI b&#225;o c&#225;o t&#224;i ch&#237;nh'
+      + ' t&#7915; c&#225;c c&#244;ng ty ch&#7913;ng kho&#225;n Vi&#7879;t Nam &mdash; <b style="color:#0b1f1d">m&#7895;i ng&#224;y</b>.</p>'
+      + '<div class="ob-flow">'
+      + flowNode('📄', 'Báo cáo CK') + '<div class="ob-flow-arrow">→</div>'
+      + flowNode('✨', 'AI extract citation') + '<div class="ob-flow-arrow">→</div>'
+      + flowNode('⚖️', 'AI Judge')   + '<div class="ob-flow-arrow">→</div>'
+      + flowNode('📊', 'Dashboard')
+      + '</div>'
+      + '</div>';
+  }
+
+  function slide2(dir) {
+    var benefits = [
+      { i:'🛰️', t:'Giám sát diện rộng',    d:'LLM judge + deterministic code chấm mọi summary sau release PROD' },
+      { i:'⚡',  t:'Phát hiện lỗi kịp thời', d:'PM monitor hàng ngày để phát hiện ngay khi summary có vấn đề' },
+      { i:'🎯', t:'Zero kiểm thử thủ công', d:'Tiết kiệm effort kiểm thử thủ công — pipeline chạy tự động hàng ngày' },
+    ];
+    var cards = benefits.map(function(b){
+      return '<div class="ob-benefit-card">'
+        + '<div class="ob-benefit-icon">' + b.i + '</div>'
+        + '<div class="ob-benefit-title">' + b.t + '</div>'
+        + '<div class="ob-benefit-desc">'  + b.d + '</div>'
+        + '</div>';
+    }).join('');
+    return '<div class="ob-slide" style="animation:' + anim(dir) + '">'
+      + '<div class="ob-kicker"><span class="ob-kicker-dot"></span> Gi&#225; tr&#7883; &#273;em l&#7841;i</div>'
+      + '<h2 class="ob-h2">Ki&#7875;m so&#225;t ch&#7845;t l&#432;&#7907;ng <span class="ob-grad">tr&#234;n Production</span></h2>'
+      + '<p class="ob-lead" style="max-width:660px">Pipeline k&#7871;t h&#7907;p <b style="color:#0b1f1d">LLM judge</b> v&#224; <b style="color:#0b1f1d">deterministic code</b>'
+      + ' &#273;&#7875; t&#7921; &#273;&#7897;ng gi&#225;m s&#225;t ch&#7845;t l&#432;&#7907;ng summary h&#224;ng ng&#224;y, h&#7895; tr&#7907; PM ph&#225;t hi&#7879;n l&#7895;i k&#7883;p th&#7901;i.</p>'
+      + '<div class="ob-benefit-row">' + cards + '</div>'
+      + '</div>';
+  }
+
+  function slide3(dir) {
+    var bars = [78,64,90,55,82];
+    var barHtml = bars.map(function(h){
+      return '<div class="ob-mini-bar" style="height:' + h + '%"></div>';
+    }).join('');
+    var rows = [
+      { id:'SUM-091', tag:'FAIL',  bg:'#fdecec', c:'#dc2626' },
+      { id:'SUM-087', tag:'FLAG',  bg:'#fdf3e6', c:'#d97706' },
+      { id:'SUM-083', tag:'PASS',  bg:'#eaf5ef', c:'#1e9e54' },
+    ].map(function(r){
+      return '<div class="ob-mini-row">'
+        + '<span class="ob-mini-row-id">' + r.id + '</span>'
+        + '<span class="ob-mini-row-tag" style="background:' + r.bg + ';color:' + r.c + '">' + r.tag + '</span>'
+        + '</div>';
+    }).join('');
+    var spark = '<svg width="100%" height="72" viewBox="0 0 230 72" style="margin-top:12px">'
+      + '<polyline points="8,56 115,28 222,8" fill="none" stroke="#1e9e54" stroke-width="3"'
+      + ' stroke-linecap="round" stroke-linejoin="round"'
+      + ' style="stroke-dasharray:260;stroke-dashoffset:260;animation:ob-dash .9s .6s forwards"/>'
+      + '<circle cx="8"   cy="56" r="3.5" fill="#fff" stroke="#1e9e54" stroke-width="2.5" style="opacity:0;animation:ob-fadeIn .3s .9s forwards"/>'
+      + '<circle cx="115" cy="28" r="3.5" fill="#fff" stroke="#1e9e54" stroke-width="2.5" style="opacity:0;animation:ob-fadeIn .3s 1s forwards"/>'
+      + '<circle cx="222" cy="8"  r="5"   fill="#1e9e54" stroke="#1e9e54" stroke-width="2.5" style="opacity:0;animation:ob-fadeIn .3s 1.1s forwards"/>'
+      + '<style>@keyframes ob-fadeIn{from{opacity:0}to{opacity:1}}</style>'
+      + '</svg>';
+    return '<div class="ob-slide" style="animation:' + anim(dir) + '">'
+      + '<div class="ob-kicker"><span class="ob-kicker-dot"></span> T&#237;nh n&#259;ng</div>'
+      + '<h2 class="ob-h2">Qu&#7843;n l&#253; th&#244;ng minh qua <span class="ob-grad">3 t&#237;nh n&#259;ng l&#245;i</span></h2>'
+      + '<div class="ob-feat-row">'
+      + '<div class="ob-feat-card">'
+      + '<div class="ob-feat-head"><span class="ob-feat-num" style="background:#eaf5ef;color:#1e9e54">01</span>Overview metrics</div>'
+      + '<div class="ob-feat-body">Theo d&#245;i ngay hi&#7879;u su&#7845;t h&#224;ng ng&#224;y qua % Summary Fail, Hallucination rate&hellip;</div>'
+      + '<div class="ob-mini-bars">' + barHtml + '</div>'
+      + '</div>'
+      + '<div class="ob-feat-card">'
+      + '<div class="ob-feat-head"><span class="ob-feat-num" style="background:#e6f6f4;color:#0d9488">02</span>Drill-down</div>'
+      + '<div class="ob-feat-body">Chi ti&#7871;t issue c&#7911;a t&#7915;ng summary &#273;&#227; eval b&#7903;i AI: type fail/flag v&#224; l&#253; do.</div>'
+      + '<div class="ob-rows">' + rows + '</div>'
+      + '</div>'
+      + '<div class="ob-feat-card">'
+      + '<div class="ob-feat-head"><span class="ob-feat-num" style="background:#eaf5ef;color:#1e9e54">03</span>Trend Sparkline</div>'
+      + '<div class="ob-feat-body">Monitor trend c&#7911;a k&#7871;t qu&#7843; &#273;&#225;nh gi&#225; h&#224;ng ng&#224;y &#273;&#7875; ph&#225;t hi&#7879;n bi&#7871;n &#273;&#7897;ng b&#7845;t th&#432;&#7901;ng.</div>'
+      + spark
+      + '</div>'
+      + '</div>'
+      + '</div>';
+  }
+
+  function flowNode(icon, label) {
+    return '<div class="ob-flow-node">'
+      + '<div class="ob-flow-icon">' + icon + '</div>'
+      + '<div class="ob-flow-label">' + label + '</div>'
+      + '</div>';
+  }
+
+  // Start onboarding unless user has already seen it
+  var seen = false;
+  try { seen = !!localStorage.getItem(STORAGE_KEY); } catch(e){}
+  if (!seen) {
+    overlay.style.display = '';
+    render(1);
+  } else {
+    replay.style.display = '';
+  }
+})();
+</script>"""
+
     return (
         head
         + body
+        + onboarding_html
         + "\n<script>\n"
         + data_block
         + "\n"
