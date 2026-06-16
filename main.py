@@ -450,6 +450,9 @@ def dashboard(source: str = "real", date: str = "") -> Response:
     try:
         store = SupabaseStore()
         all_runs = store.fetch_eval_runs(limit=200)
+    except Exception:
+        all_runs = []
+    try:
         runs = all_runs if source == "all" else [run for run in all_runs if (run.get("summary") or {}).get("summary_model") == "precreated"]
         if date:
             runs = [r for r in runs if str(r.get("created_at", "")).startswith(date)]
