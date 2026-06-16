@@ -79,7 +79,7 @@
 - [ ] Dashboard shows aggregate totals, pass/fail/flag counts, pass rate, hallucination count/rate, buy violation count, and failure breakdown.
       verify: open `/dashboard` after seeded evals and visually inspect metrics.
 
-- [ ] Dashboard detail list shows ticker, date, verdict badge, generated summary, issues, skeleton JSON, and judge JSON.
+- [ ] Dashboard detail list shows ticker, date, verdict badge, pre-created summary, issues, skeleton JSON, and judge JSON.
       verify: expand at least one row in `/dashboard`.
 
 - [ ] Dashboard supports filtering by verdict and date.

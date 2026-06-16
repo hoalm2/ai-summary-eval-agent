@@ -80,7 +80,7 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("Failure patterns", html)
         self.assertIn("Type A — factual/logic hallucination", html)
         self.assertIn("BUY — buy price violation", html)
-        self.assertIn("50%", html)
+        self.assertIn("% Summary Fail/Flag", html)
         self.assertNotIn("SECRET FULL REPORT TEXT SHOULD NOT RENDER", html)
 
 

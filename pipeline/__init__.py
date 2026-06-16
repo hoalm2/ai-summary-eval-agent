@@ -1,2 +1,2 @@
-"""AI Summary Eval pipeline package."""
+"""AI Summary Judge pipeline package."""
 

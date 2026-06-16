@@ -1,4 +1,4 @@
-# AI Summary Eval Agent — Tech Stack
+# AI Summary Judge — Tech Stack
 
 ## Runtime
 
@@ -21,7 +21,6 @@
 - **Contest provider:** GreenNode MaaS.
 - **Stage 1 skeleton model:** `gemini/gemini-3.1-pro-preview` (`MODEL_SKELETON`).
 - **Stage 1b alignment model:** `gemini/gemini-3.1-pro-preview` (`MODEL_ALIGN`, defaults to `MODEL_SKELETON`).
-- **Stage 2 summary model** *(contest shim)*: `openai/gpt-5-mini` (`MODEL_SUMMARY`).
 - **Stage 3b judge model:** `openai/gpt-5-mini` (`MODEL_JUDGE`).
 - **Fallback model:** `deepseek/deepseek-v4-pro` (`MODEL_FALLBACK`).
 - **API routing:** GPT-5 models use the **Responses API** (`client.responses.create`, non-streaming). All other models use Chat Completions.
@@ -37,8 +36,6 @@
 6. **Stage 3c — Merge & verdict:** deterministic `compute_verdict()` from merged issues.
 7. **Persist:** write eval result to Supabase.
 8. **Dashboard:** serve aggregate metrics and per-summary detail from one HTML endpoint.
-
-> Stage 2 (summary generation) is a contest shim kept for ad hoc use — not part of the main `/run-daily` flow.
 
 ## Configuration
 
@@ -56,7 +53,6 @@ Important optional variables:
 - `GREENNODE_JSON_MODE`
 - `MODEL_SKELETON`
 - `MODEL_ALIGN`
-- `MODEL_SUMMARY`
 - `MODEL_JUDGE`
 - `MODEL_FALLBACK`
 - `ALLOWED_PDF_HOSTS`

@@ -1,6 +1,7 @@
 fastapi
 uvicorn
 openai>=1
+anthropic
 pydantic>=2
 pymupdf
 python-dotenv

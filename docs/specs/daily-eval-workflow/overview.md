@@ -1,4 +1,4 @@
-# AI Summary Eval Agent — Overview
+# AI Summary Judge — Overview
 
 > For both technical and non-technical readers. Read this before the spec details or code.
 
@@ -6,7 +6,7 @@
 
 ## What This Is
 
-The AI Summary Eval Agent is an automated quality-control pipeline for Vietnamese stock-research AI summaries. Every day it reads source analyst reports, generates bullet-point summaries, then judges each summary against the original report using a two-layer check: an LLM judge and a deterministic code-level fact verifier. Results are stored in Supabase and surfaced through a single dashboard endpoint that any stakeholder can open without logging in.
+The AI Summary Judge is an automated quality-control pipeline for Vietnamese stock-research AI summaries. Every day it receives pre-created summaries from Supabase, then judges each one against the source analyst report using a two-layer check: an LLM judge and a deterministic code-level fact verifier. Results are stored in Supabase and surfaced through a single dashboard endpoint that any stakeholder can open without logging in.
 
 The agent replaces a fully manual PO review workflow (NotebookLM + Claude chat + Excel) that took 15–20 minutes per summary, could not scale, and produced no durable regression history.
 
@@ -65,7 +65,6 @@ Supabase `reports` + `summaries` tables
   /dashboard — aggregate metrics + per-summary detail
 ```
 
-> Stage 2 (Summary Generation, GPT-5 Mini) is a **contest shim only** — not in the main `/run-daily` flow. `/run-daily` uses pre-seeded summaries from the `summaries` table.
 
 ### Why two judging layers?
 
@@ -125,7 +124,6 @@ Each stage uses a model chosen for its specific requirements. Priority reflects 
 | 0 | PDF Acquisition | — (no LLM) | Pure text extraction + regex validation | — | N/A |
 | 1 | Skeleton Extraction | `gemini/gemini-3.1-pro-preview` | Largest context window; best document grounding for long Vietnamese PDFs | `qwen3-5-27b` | **HIGH** |
 | 1b | Citation Alignment | `gemini/gemini-3.1-pro-preview` | Must track verbatim quotes from report; same model as Stage 1 for context consistency | `qwen3-5-27b` | **HIGH** |
-| 2 | Summary Generation *(contest shim)* | `openai/gpt-5-mini` | Strong instruction-following; structured Vietnamese bullet output | `qwen3-5-27b` | MED |
 | 3a | Deterministic Factcheck | — (no LLM) | Pure regex/token matching — zero hallucination risk | — | N/A |
 | 3b | LLM Judge | `openai/gpt-5-mini` | Critical node — a parse error propagates to ERROR verdict for the whole record | `deepseek/deepseek-v4-pro` | **CRITICAL** |
 | 3c | Merge & Verdict | — (logic code) | `compute_verdict()` is deterministic Python — verdict never delegated to LLM | — | N/A |
@@ -220,8 +218,7 @@ Full `report_text` is never exposed in any endpoint.
 | Stage 1 — skeleton | Gemini 3.1 Pro Preview | ~4,600 (long PDF input + JSON output) |
 | Stage 1b — alignment | Gemini 3.1 Pro Preview | ~5,000 (report + summary → bullet citations) |
 | Stage 3b — judge | GPT-5 Mini | ~5,700 (report + skeleton + checklist) |
-| Stage 2 — summary *(contest shim)* | GPT-5 Mini | ~4,400 (not in main flow) |
-| **Total per record (main flow)** | | **~15,300** |
+| **Total per record** | | **~15,300** |
 
 ### QC strategy — do not burn tokens before validation
 

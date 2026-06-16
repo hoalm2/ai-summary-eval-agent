@@ -1,4 +1,4 @@
-# AI Summary Eval Agent — Mission
+# AI Summary Judge — Mission
 
 ## Problem
 

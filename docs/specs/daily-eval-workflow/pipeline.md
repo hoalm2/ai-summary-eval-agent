@@ -4,16 +4,8 @@ Detailed technical reference for each stage of the eval pipeline. Covers input/o
 
 ---
 
-## Contest vs Production Pipeline
+## Pipeline Flow
 
-The pipeline is designed so Stage 2 (summary generation) is a **contest-only shim**. The main `/run-daily` flow now uses pre-created summaries from Supabase and skips Stage 2.
-
-**Contest shim flow** (kept for ad hoc use):
-```
-Stage 0 → Stage 1 → Stage 2 → Stage 1b → Stage 3 → persist
-```
-
-**Production-like daily flow** (current):
 ```
 Stage 0 → Stage 1 → Stage 1b → Stage 3 → persist
 ```
@@ -28,9 +20,9 @@ There are three ways the pipeline is triggered, all via HTTP:
 
 | Endpoint | Trigger | What it runs |
 |---|---|---|
-| `POST /run-daily` | Manual (demo) or cron | Production-like flow: PDF → Stage 1 → Stage 1b → Stage 3 → persist |
-| `POST /run-demo` | Demo mode | Stage 1 + Stage 1b + Stage 3 on already-stored summaries (skips Stage 2) |
-| `POST /run-one` | Ad hoc / testing | Stage 1 + Stage 1b + Stage 3 on inline report + summary text; optional persist |
+| `POST /run-daily` | Manual or cron | Stage 0 → Stage 1 → Stage 1b → Stage 3 → persist |
+| `POST /run-demo` | Demo mode | Stage 1 → Stage 1b → Stage 3 on already-stored summaries |
+| `POST /run-one` | Ad hoc / testing | Stage 1 → Stage 1b → Stage 3 on inline report + summary text; optional persist |
 
 All write-enabled endpoints require `X-Demo-Token` header.
 
@@ -132,7 +124,7 @@ The skeleton is passed as a hint to Stage 3, and persisted as `eval_runs.skeleto
 **LLM call type:** `json_chat`  
 **Max tokens:** `settings.skeleton_max_tokens`
 
-Runs **immediately after Stage 1** in the main flow (summary is pre-existing from `summaries` table). In the contest shim flow, runs after Stage 2. For each bullet in the summary, finds 1–3 verbatim quotes from the report that a reader would need to verify or refute that bullet's claim.
+Runs immediately after Stage 1. The summary is pre-existing from the `summaries` table. For each bullet, finds 1–3 verbatim quotes from the report that a reader would need to verify or refute that bullet's claim.
 
 This stage is what enables per-bullet eval in Stage 3 and the bullet-level breakdown in the dashboard.
 
@@ -140,7 +132,7 @@ This stage is what enables per-bullet eval in Stage 3 and the bullet-level break
 
 ```
 report_text: str      # full report text
-summary_text: str     # the generated (or pre-existing) summary
+summary_text: str     # pre-existing summary from summaries table
 ```
 
 ### User prompt structure
@@ -171,48 +163,6 @@ Returns `[]` on parse error — Stage 3 degrades gracefully (falls back to full 
 
 - Parse error after 2 retries → returns `[]`, pipeline continues
 - In mock mode → returns a single placeholder bullet with `"MOCK_LLM_MODE bullet alignment"` citation
-
----
-
-## Stage 2 — Summary Generation (contest only)
-
-**File:** `pipeline/stage2_summary.py` — `generate_summary()`  
-**Prompt:** `prompts/summary_generate.md`  
-**Model:** `settings.model_summary` (default: `openai/gpt-5-mini`)  
-**LLM call type:** `text_chat` (free-text, not JSON)  
-**Max tokens:** `settings.summary_max_tokens`
-
-Not called by the main `/run-daily` flow. Kept as a contest/demo shim through `generate_and_evaluate_report()`. The `/run-demo`, `/run-one`, and production-like `/run-daily` paths receive a pre-written summary and skip this stage.
-
-### Input
-
-```
-report_text: str     # full report text
-ticker: str | None   # injected for context
-```
-
-### User prompt structure
-
-```
-Ticker: {ticker}
-
-<REPORT>
-{report_text}
-</REPORT>
-```
-
-### Output
-
-```
-summary_text: str    # Vietnamese bullet summary, ≤ 5 bullets, 1–2 sentences each
-```
-
-When the contest shim is used, the generated summary is immediately written to the `summaries` table before Stage 3 runs, so a failure in Stage 3 does not cause data loss.
-
-### Error paths
-
-- Timeout / API error → raises exception → caught by `generate_and_evaluate_report_safely()` → `persist_error_eval()` → ERROR verdict, `summary_model = "unexpected_error"`
-- In mock mode → returns `"• Mock summary: nội dung này chỉ dùng để test local, không gọi GreenNode."` — `summary_model` written as `"mock_llm"`
 
 ---
 
@@ -393,7 +343,6 @@ Controlled by `MOCK_LLM_MODE` env var (default `true`).
 |---|---|---|
 | Stage 1 LLM call | Returns fixed skeleton JSON, 0 tokens | Calls GreenNode `gemini/gemini-3.1-pro-preview` |
 | Stage 1b LLM call | Returns single placeholder bullet, 0 tokens | Calls GreenNode `gemini/gemini-3.1-pro-preview` |
-| Stage 2 LLM call | Skipped by `/run-daily`; returns fixed mock summary only in contest shim | Skipped by `/run-daily`; calls GreenNode only in contest shim |
 | Stage 3b LLM judge | Keyword-matches summary for `buy_price_timing`, `B_tone_escalation`, `A_logic_temporal`, `C_disclaimer_omission` | Calls GreenNode `openai/gpt-5-mini` via Responses API |
 | Deterministic factcheck | Runs normally (no LLM) | Runs normally |
 | Supabase reads/writes | Real | Real |

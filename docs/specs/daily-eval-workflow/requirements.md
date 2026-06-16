@@ -8,12 +8,11 @@ The daily eval workflow evaluates Vietnamese stock-research AI summaries against
 
 - Pick unevaluated reports from Supabase.
 - Ensure each report has reliable `report_text`, extracting from an allowlisted PDF source when necessary.
-- Generate a Vietnamese summary for each report.
 - Extract an auditable report skeleton.
-- Judge the generated summary against the full report text and eval checklist.
+- Judge the pre-created summary against the full report text and eval checklist.
 - Merge LLM judge issues with deterministic factcheck issues.
 - Compute final verdict in code.
-- Persist summaries and eval runs to Supabase.
+- Persist eval runs to Supabase.
 - Render one dashboard endpoint containing aggregate metrics and per-summary details.
 - Support a token-free mock path for local and first cloud testing.
 

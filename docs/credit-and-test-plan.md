@@ -12,15 +12,14 @@
 
 ## Ước tính chi phí per report
 
-Main flow (`/run-daily`) chạy 3 LLM calls/report (Stage 2 đã bỏ khỏi main flow):
+Main flow (`/run-daily`) chạy 3 LLM calls/report:
 
 | Stage | Model | Input (tok) | Output (tok) | Subtotal (tok) | Ghi chú |
 |---|---|---|---|---|---|
 | Stage 1 — skeleton | gemini/gemini-3.1-pro-preview | ~4,000 | ~600 | ~4,600 | |
 | Stage 1b — align | gemini/gemini-3.1-pro-preview | ~4,500 | ~500 | ~5,000 | |
 | Stage 3b — judge | openai/gpt-5-mini | ~5,000 | ~700 | ~5,700 | Responses API |
-| **Tổng/report (main flow)** | | **~13,500** | **~1,800** | **~15,300 tok** | |
-| Stage 2 — summary *(contest shim)* | openai/gpt-5-mini | ~4,000 | ~400 | ~4,400 | Không dùng trong `/run-daily` |
+| **Tổng/report** | | **~13,500** | **~1,800** | **~15,300 tok** | |
 
 > ⚠️ Chưa biết tỉ lệ chính xác credit/token của GreenNode — cần verify trên portal (Billing → MaaS pricing) sau lần test đầu.
 > Mọi số ở dưới đều dùng giả định worst-case: **1 credit = 1 token**.
@@ -107,7 +106,7 @@ Mục tiêu: smoke test sau deploy, xác nhận endpoint prod hoạt động.
 | **MaaS có sẵn** | **5,000,000** |
 | **Dư** | **~2,454,000** |
 
-→ Đủ để chạy toàn bộ kế hoạch, còn ~2.45M dự phòng (tăng từ 1.6M nhờ bỏ Stage 2 khỏi main flow).
+→ Đủ để chạy toàn bộ kế hoạch, còn ~2.45M dự phòng.
 → Chỉ cần nạp thêm từ ví tổng sang MaaS **nếu** giá thực tế tệ hơn ước tính (unlikely).
 
 ---

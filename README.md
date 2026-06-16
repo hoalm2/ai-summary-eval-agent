@@ -1,4 +1,4 @@
-# AI Summary Eval Agent
+# AI Summary Judge
 
 Supabase-backed MVP agent for evaluating Vietnamese stock-research AI summaries. The agent reads preloaded reports and pre-created summaries from Supabase, extracts a report skeleton, judges the summary against the full report text, persists verdicts back to Supabase, and renders a simple dashboard.
 
@@ -15,14 +15,14 @@ Supabase reports + pre-created summaries
   -> /dashboard
 ```
 
-The production-like daily flow has **3 LLM stages + 1 persistence step**. Stage 2 summary generation remains in the repo as a contest/demo shim, but `/run-daily` now evaluates pre-created summaries from Supabase. During token-free testing, LLM stages are mocked locally with `MOCK_LLM_MODE=true`; Supabase reads/writes and dashboard behavior still run for real.
+The daily eval flow has **3 LLM stages + 1 persistence step**. `/run-daily` evaluates pre-created summaries from Supabase — summary generation is out of scope. During token-free testing, LLM stages are mocked locally with `MOCK_LLM_MODE=true`; Supabase reads/writes and dashboard behavior still run for real.
 
 ## Storage Decision
 
 - Supabase Postgres is the durable source of truth for `reports`, `summaries`, `eval_runs`, and `agent_state`.
 - Original PDF URLs are stored in `reports.source_pdf_url`.
 - Extracted `report_text` is stored once so daily runtime does not repeatedly download/parse PDFs.
-- `summaries` store pre-created summary text linked to `reports`; `/run-daily` evaluates these rows instead of generating new summaries.
+- `summaries` store pre-created summary text linked to `reports`; `/run-daily` evaluates these rows.
 - `/run-daily` skips any summary that already has at least one `eval_runs` row, so the same summary is not evaluated twice.
 - Supabase Storage is only needed if original public PDF links become unstable.
 - Generated `data/`, local `storage/`, and `.env` files are ignored and should not be committed.
@@ -52,7 +52,7 @@ Token-safe defaults:
 Tables:
 
 - `reports`: report metadata, URL, optional storage path, and extracted text.
-- `summaries`: generated summary text linked to a report.
+- `summaries`: pre-created summary text linked to a report.
 - `eval_runs`: append-only evaluation history.
 - `agent_state`: runtime flags and cursors — `pipeline_enabled` (kill switch), `last_daily_run` (last batch metadata).
 
@@ -197,7 +197,7 @@ Rules:
 - `GET /health`: app liveness.
 - `GET /status`: deployment smoke test without exposing secrets; shows mock mode, Supabase connectivity, and row counts.
 - `GET /results`: safe JSON eval history, excluding full `report_text`.
-- `GET /dashboard`: HTML dashboard with aggregate metrics, verdict/ticker/date filters, generated summaries, issue details, skeleton JSON, and judge JSON.
+- `GET /dashboard`: HTML dashboard with aggregate metrics, verdict/ticker/date filters, summary issues, skeleton JSON, and judge JSON.
 - `GET /pipeline/status`: current kill-switch state and last batch metadata.
 - `POST /pipeline/enable`: enable `/run-daily` (requires `X-Demo-Token`).
 - `POST /pipeline/disable`: disable `/run-daily` — any trigger returns immediately, 0 LLM calls (requires `X-Demo-Token`).

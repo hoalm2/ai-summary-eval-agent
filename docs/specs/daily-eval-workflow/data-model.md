@@ -58,7 +58,7 @@ When `skip_existing=true` (default), duplicate reports are skipped silently.
 
 ## `summaries`
 
-Stores pre-created or generated summaries. One row per summary to evaluate. In the production-like daily flow, summaries are seeded before `/run-daily`; Stage 2 generation remains only as a contest/demo shim.
+Stores pre-created summaries. One row per summary to evaluate. Summaries are seeded before `/run-daily` runs.
 
 | Column | Type | Nullable | Notes |
 |---|---|---|---|
@@ -73,9 +73,7 @@ Stores pre-created or generated summaries. One row per summary to evaluate. In t
 | Value | Condition |
 |---|---|
 | `"precreated"` | Summary was imported/seeded before eval |
-| `"openai/gpt-5-mini"` (or `MODEL_SUMMARY` value) | Real GreenNode run via contest shim |
 | `"mock_llm"` | `MOCK_LLM_MODE=true` |
-| `"unexpected_error"` | Stage 2 raised an unexpected exception |
 | `"extract_failed"` / `"extract_too_short"` | Report text could not be obtained |
 
 ---

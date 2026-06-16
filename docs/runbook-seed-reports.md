@@ -13,8 +13,6 @@ Flow seed mới vẫn dùng **một input JSON**, nhưng backend/script sẽ ghi
 
 Không thêm `summary_text` vào `reports` và không drop bảng `summaries`. Bảng `summaries` vẫn là source cho summary text trong `eval_runs` + dashboard hiện tại.
 
-Stage 2 summary generation đã được bỏ khỏi main `/run-daily` flow bằng cách dùng summary đã seed sẵn trong `summaries`.
-
 ---
 
 ## Bước 1 — Chạy migration SQL (chỉ làm 1 lần)
