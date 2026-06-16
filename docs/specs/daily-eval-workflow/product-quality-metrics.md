@@ -1,6 +1,6 @@
-# Product Quality Metrics — AI Summary Feature
+# Product Quality Metrics — AI Summary Judge
 
-PRD-level success criteria for the AI Summary feature deployed to end users. These thresholds define what "healthy" looks like in production and are used as pass/fail gates for daily monitoring.
+PRD-level success criteria for the AI Summary Judge feature deployed to end users. These thresholds define what "healthy" looks like in production and are used as pass/fail gates for daily monitoring.
 
 The eval agent's taxonomy ([eval-taxonomy.md](eval-taxonomy.md)) covers the internal issue categories. This file defines the *outcome metrics* those categories roll up into.
 
@@ -8,12 +8,11 @@ The eval agent's taxonomy ([eval-taxonomy.md](eval-taxonomy.md)) covers the inte
 
 ## 3.1 Quality Metrics — Accuracy & Reliability
 
-| Metric | Target | Definition |
-|---|---|---|
-| **Hallucination rate** | ≤ 2% of sampled summaries | Summaries with ≥ 1 Type A or Type B issue (excl. `B_tone_escalation`) ÷ total sampled summaries |
-| **CXM display rate** | ≥ 98% confirmed displayed | % of generated summaries confirmed rendered to end users in CXM without system error |
-| **Buy price prohibition** | 0 violations | Count of summaries with any `buy_price_absolute`, `buy_price_upside`, or `buy_price_timing` BLOCK issue |
-| **UI format compliance** | ≥ 95% | % of summaries with 0 `format` or `render` FLAG issues (correct bullet structure, Vietnamese language, length within spec) |
+| Metric | Target | Definition | Dashboard card |
+|---|---|---|---|
+| **Hallucination rate** | ≤ 2% of evaluated summaries | Summaries with ≥ 1 Type A or Type B issue (excl. `B_tone_escalation`) ÷ total evaluated summaries | Hallucination rate |
+| **Buy price prohibition** | 0 violations | Count of summaries with any `buy_price_absolute`, `buy_price_upside`, or `buy_price_timing` BLOCK issue | Buy violations |
+| **UI format compliance** | ≥ 95% | % of summaries with 0 `format` or `render` FLAG issues (correct bullet structure, Vietnamese language, length within spec) | Format compliance |
 
 ### How these map to eval verdict categories
 
@@ -31,10 +30,9 @@ The eval agent's taxonomy ([eval-taxonomy.md](eval-taxonomy.md)) covers the inte
 
 | Metric | Target | Definition |
 |---|---|---|
-| **Format consistency** | ≥ 95% of summaries | % of summaries with bullet-point format and length consistent with prompt spec (≤ 5 bullets, 1–2 sentences each, Vietnamese) |
 | **User downvote rate** | ≤ 5% of summaries | % of displayed summaries receiving a user downvote — threshold above which the AI chat / explanation feature is triggered |
 
-> **User downvote rate** is a *downstream* product metric not directly measurable by the eval agent (requires live user feedback data). Track separately from the automated eval. The eval agent's `format` + `render` FLAG rate is a leading indicator.
+> **User downvote rate** is a *downstream* product metric not directly measurable by the eval agent (requires live user feedback data from CXM). Track separately from the automated eval. The eval agent's `format` + `render` FLAG rate (Format compliance card) is a leading indicator.
 
 ---
 
@@ -42,10 +40,9 @@ The eval agent's taxonomy ([eval-taxonomy.md](eval-taxonomy.md)) covers the inte
 
 | Metric | Target | Definition |
 |---|---|---|
-| **Creation success rate** | ≥ 98% | % of batch jobs completing without `ERROR` verdict (i.e., report text readable + judge output parseable) |
-| **Render time (P90)** | ≤ 3s from BE call | 90th-percentile latency from backend summary-fetch call to CXM display — measured at product layer, not within eval agent |
+| **Eval pipeline success rate** | ≥ 98% | % of batch runs completing without `ERROR` verdict (i.e., report text readable + judge output parseable) — `evaluated_count ÷ total` |
 
-> **Creation success rate** is directly measurable by the eval agent: `(total runs − ERROR runs) ÷ total runs`. Target ≥ 98% maps to no more than 1 ERROR per 50 reports.
+> **Eval pipeline success rate** is directly measurable by the eval agent. Target ≥ 98% maps to no more than 1 ERROR per 50 reports. Shown on the dashboard run list as the ERROR count per batch.
 
 ---
 
@@ -56,6 +53,6 @@ The launch criteria in [requirements.md](requirements.md) are the *contest* gate
 | Gate | Source | When it applies |
 |---|---|---|
 | Pass rate ≥ 85%, zero Type A/B on adversarial sample, zero buy violations | requirements.md | Contest launch sample only |
-| Hallucination rate ≤ 2%, creation success ≥ 98%, format compliance ≥ 95%, downvote rate ≤ 5% | This file | Ongoing production monitoring |
+| Hallucination rate ≤ 2%, eval pipeline success ≥ 98%, format compliance ≥ 95%, downvote rate ≤ 5% | This file | Ongoing production monitoring |
 
 The eval agent's daily batch output should be compared against both sets of thresholds: the launch criteria for the contest demo, and these product metrics for production readiness reporting.

@@ -5,7 +5,7 @@ import json
 from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 
 from config import get_settings
@@ -442,15 +442,16 @@ def import_reports(payload: ReportImportRequest, x_demo_token: str | None = Head
     }
 
 
-@app.get("/dashboard", response_class=HTMLResponse)
-def dashboard(source: str = "real", date: str = "") -> str:
+@app.get("/dashboard")
+def dashboard(source: str = "real", date: str = "") -> Response:
     store = SupabaseStore()
     all_runs = store.fetch_eval_runs(limit=200)
     runs = all_runs if source == "all" else [run for run in all_runs if (run.get("summary") or {}).get("summary_model") == "precreated"]
     if date:
         runs = [r for r in runs if str(r.get("created_at", "")).startswith(date)]
     aggregate = aggregate_runs(runs)
-    return render_dashboard(aggregate, runs, data_source=source, date_filter=date)
+    html = render_dashboard(aggregate, runs, data_source=source, date_filter=date)
+    return Response(content=html, media_type="text/html", headers={"Cache-Control": "no-store"})
 
 
 ISSUE_GROUP_LABELS = {
@@ -507,6 +508,7 @@ def aggregate_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
     failure_breakdown: dict[str, int] = {}
     hallucination_count = 0
     buy_violation_count = 0
+    format_violation_count = 0
     total_bullets = 0
     flagged_bullet_keys: set[str] = set()
     for run in runs:
@@ -533,6 +535,8 @@ def aggregate_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
             for i in all_issues
         ):
             hallucination_count += 1
+        if any(str(i.get("category", "")) in ("format", "render") for i in all_issues):
+            format_violation_count += 1
     pass_count = verdict_counts.get("PASS", 0)
     fail_count = verdict_counts.get("FAIL", 0)
     flag_count = verdict_counts.get("PASS-WITH-FLAG", 0)
@@ -547,10 +551,12 @@ def aggregate_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
         "flag_count": flag_count,
         "error_count": error_count,
         "pass_rate": pass_count / evaluated_count if evaluated_count else 0,
-        "fail_flag_rate": (fail_count + flag_count) / evaluated_count if evaluated_count else 0,
+        "fail_flag_rate": fail_count / evaluated_count if evaluated_count else 0,
         "hallucination_count": hallucination_count,
         "hallucination_rate": hallucination_count / evaluated_count if evaluated_count else 0,
         "buy_violation_count": buy_violation_count,
+        "format_violation_count": format_violation_count,
+        "format_compliance_rate": 1 - (format_violation_count / evaluated_count if evaluated_count else 0),
         "total_bullets": total_bullets,
         "flagged_bullets": flagged_bullets,
         "bullet_fail_rate": flagged_bullets / total_bullets if total_bullets else 0,
@@ -656,7 +662,7 @@ def render_dashboard(aggregate: dict[str, Any], runs: list[dict[str, Any]], *, d
     total = aggregate["total_evaluated"]
     fail_count = aggregate.get("fail_count", 0)
     flag_count = aggregate.get("flag_count", 0)
-    fail_flag_rate = aggregate.get("fail_flag_rate", (fail_count + flag_count) / total if total else 0)
+    fail_flag_rate = aggregate.get("fail_flag_rate", fail_count / total if total else 0)
     buy_n = aggregate.get("buy_violation_count", 0)
     total_bullets = aggregate.get("total_bullets", 0)
     flagged_bullets = aggregate.get("flagged_bullets", 0)
@@ -697,6 +703,8 @@ def render_dashboard(aggregate: dict[str, Any], runs: list[dict[str, Any]], *, d
         "failFlagRate": fail_flag_rate,
         "hallN": aggregate.get("hallucination_count", 0),
         "buyN": buy_n,
+        "fmtN": aggregate.get("format_violation_count", 0),
+        "fmtCompliance": aggregate.get("format_compliance_rate", 1.0),
         "totalBullets": total_bullets,
         "flaggedBullets": flagged_bullets,
         "bulletFailRate": bullet_fail_rate,
@@ -754,7 +762,7 @@ code { font-family: "SF Mono", Consolas, "Courier New", monospace; }
 
 /* ─── METRIC CARDS ───────────────────────────────────── */
 .metrics {
-  display: grid; grid-template-columns: repeat(4,1fr); gap: 10px;
+  display: grid; grid-template-columns: repeat(5,1fr); gap: 10px;
   padding: 6px 0 14px;
 }
 .mc {
@@ -1157,9 +1165,9 @@ hr.d-rule { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
 
   <!-- ── TREND ──────────────────────────────────── -->
   <div class="panel" id="panel-trend">
-    <p class="panel-desc">Monitor trend của % summary Fail/Flag theo daily evaluation.</p>
+    <p class="panel-desc">Monitor trend của % summary Fail theo daily evaluation (FLAG không tính vào tử số).</p>
     <div class="card" style="margin-bottom:16px">
-      <h3 class="card-title">% Summary Fail/Flag trend <span style="font-weight:400;font-size:12px;color:var(--sub)">(7 days · 15% threshold)</span></h3>
+      <h3 class="card-title">% Summary Fail trend <span style="font-weight:400;font-size:12px;color:var(--sub)">(7 days · 15% threshold)</span></h3>
       <div class="trend-svg-wrap" id="trendChart"></div>
     </div>
     <div class="card">
@@ -1185,31 +1193,37 @@ function ring(pct, color, sz, sw) {
 
 /* ═══════════════════ METRIC CARDS ═══════════════════ */
 var TIPS = {
-  failflag:'Đo theo đơn vị summary đã được eval thành công (loại trừ ERROR). % summary có ít nhất 1 issue (FAIL hoặc FLAG). Mục tiêu ≤ 15% (tức pass rate ≥ 85%).',
-  hall:'% summary có ít nhất 1 hallucination issue (Type A hoặc Type B) trong batch. Tính trên số summary eval thành công (loại trừ ERROR). Mục tiêu ≤ 20%.',
+  failflag:'Đo theo đơn vị summary đã được eval thành công (loại trừ ERROR). % summary bị FAIL (verdict = FAIL). FLAG không tính vào tử số. Mục tiêu ≤ 15%.',
+  hall:'% summary có ít nhất 1 hallucination issue (Type A hoặc Type B) trong batch. Tính trên số summary eval thành công (loại trừ ERROR). Mục tiêu ≤ 2%.',
   buy:'Số issue vi phạm quy tắc buy price (đề xuất vùng giá mua, upside không kèm ngày tham chiếu…) trong batch. Đây là rủi ro an toàn sản phẩm — mục tiêu = 0 tuyệt đối.',
-  bullet:'Đo theo đơn vị bullet point: % các câu (bullet) trong summary bị đánh dấu FAIL/FLAG, tính trên tổng số bullet của tất cả summary trong batch. Mục tiêu ≤ 10%.'
+  bullet:'Đo theo đơn vị bullet point: % các câu (bullet) trong summary bị đánh dấu FAIL/FLAG, tính trên tổng số bullet của tất cả summary trong batch. Mục tiêu ≤ 10%.',
+  fmt:'% summary có ít nhất 1 issue định dạng (format/render FLAG) trong batch. Đo compliance với bullet structure, ngôn ngữ tiếng Việt và độ dài theo spec. Mục tiêu ≥ 95% compliance (tức ≤ 5% vi phạm).'
 };
 
 function renderMetrics(agg) {
-  var hallRate = agg.total ? agg.hallN / agg.total : 0;
+  var hallRate = agg.evaluated ? agg.hallN / agg.evaluated : 0;
+  var fmtViolRate = agg.evaluated ? agg.fmtN / agg.evaluated : 0;
   var cards = [
-    { label:'% Summary Fail/Flag', val:Math.round(agg.failFlagRate*100)+'%',
-      desc:'% <em>summary</em> có ≥ 1 issue — '+( agg.fail+agg.flag)+'/'+agg.evaluated+' summaries eval thành công (loại trừ '+( agg.total-agg.evaluated)+' ERROR).',
+    { label:'% Summary Fail', val:Math.round(agg.failFlagRate*100)+'%',
+      desc:'<em>FAIL</em> / evaluated: '+agg.fail+'/'+agg.evaluated+' summaries (loại trừ FLAG và '+( agg.total-agg.evaluated)+' ERROR).',
       target:'≤ 15%', ok:agg.failFlagRate<=0.15,
       ringPct:agg.failFlagRate, tip:TIPS.failflag, fn:'onMC0' },
     { label:'Hallucination rate', val:Math.round(hallRate*100)+'%',
       desc:'% <em>summary</em> có issue Type A hoặc Type B — '+agg.hallN+'/'+agg.evaluated+' summaries eval thành công.',
-      target:'≤ 20%', ok:hallRate<=0.20,
+      target:'≤ 2%', ok:hallRate<=0.02,
       ringPct:hallRate, tip:TIPS.hall, fn:'onMC1' },
     { label:'Buy violations', val:''+agg.buyN,
       desc:'Số <em>issue vi phạm quy tắc buy price</em> trong batch — rủi ro an toàn sản phẩm.',
       target:'= 0', ok:agg.buyN===0,
       ringPct:Math.min(agg.buyN/4,1), tip:TIPS.buy, fn:'onMC2' },
+    { label:'Format compliance', val:Math.round((1-fmtViolRate)*100)+'%',
+      desc:'% <em>summary</em> không có format/render FLAG — '+agg.fmtN+'/'+agg.evaluated+' summary vi phạm định dạng trong batch.',
+      target:'≥ 95%', ok:(1-fmtViolRate)>=0.95,
+      ringPct:fmtViolRate, tip:TIPS.fmt, fn:'onMC3' },
     { label:'% Fail/Flag bullet / summary', val:Math.round(agg.bulletFailRate*100)+'%',
       desc:'% <em>bullet point</em> bị đánh dấu — '+agg.flaggedBullets+'/'+agg.totalBullets+' bullet trên toàn batch.',
       target:'≤ 10%', ok:agg.bulletFailRate<=0.10,
-      ringPct:Math.min(agg.bulletFailRate,1), tip:TIPS.bullet, fn:'onMC3' }
+      ringPct:Math.min(agg.bulletFailRate,1), tip:TIPS.bullet, fn:'onMC4' }
   ];
   document.getElementById('metricsRow').innerHTML = cards.map(function(c,i) {
     var col = c.ok ? '#12612f' : '#c0392b';
@@ -1227,7 +1241,7 @@ function renderMetrics(agg) {
 }
 
 function setActiveCard(idx) {
-  [0,1,2,3].forEach(function(i) {
+  [0,1,2,3,4].forEach(function(i) {
     var el = document.getElementById('mc'+i);
     if (el) el.classList.toggle('active-card', i===idx);
   });
@@ -1236,7 +1250,8 @@ function setActiveCard(idx) {
 function onMC0() { setActiveCard(0); switchTab('overview'); }
 function onMC1() { setActiveCard(1); filterAndDetail({cat:'hallucination'}); }
 function onMC2() { setActiveCard(2); filterAndDetail({cat:'BUY'}); }
-function onMC3() { setActiveCard(3); filterAndDetail({cat:'hallucination'}); }
+function onMC3() { setActiveCard(3); filterAndDetail({cat:'FMT'}); }
+function onMC4() { setActiveCard(4); filterAndDetail({cat:'hallucination'}); }
 
 /* ═══════════════════ OVERVIEW ═══════════════════ */
 var G_LABEL = { A:'Type A — factual/logic hallucination', B:'Type B — unsupported/fabricated claim', BUY:'BUY — buy price violation', C:'Type C — disclaimer omission', FMT:'Format inconsistency' };
@@ -1483,7 +1498,7 @@ function renderTrendChart() {
   var cw=W-PL-PR, ch=H-PT-PB, n=TRENDS.length;
   var rates = TRENDS.map(function(t){
     var ev = t.pass+t.fail+t.flag;
-    return ev ? (t.fail+t.flag)/ev : 0;
+    return ev ? t.fail/ev : 0;
   });
   function xi(i){ return n<=1 ? PL+cw/2 : PL + (i/(n-1))*cw; }
   function yr(r){ return PT + (1-r)*ch; }
@@ -1514,10 +1529,10 @@ function renderTrendChart() {
 }
 
 function renderTrendTable() {
-  var thead = '<thead><tr><th>Date</th><th>Evaluated</th><th>% Fail/Flag</th><th>PASS</th><th>FAIL</th><th>FLAG</th><th>ERROR</th></tr></thead>';
+  var thead = '<thead><tr><th>Date</th><th>Evaluated</th><th>% Fail</th><th>PASS</th><th>FAIL</th><th>FLAG</th><th>ERROR</th></tr></thead>';
   var rows = TRENDS.slice().reverse().map(function(t) {
     var ev = t.pass+t.fail+t.flag;
-    var ffr = ev ? (t.fail+t.flag)/ev : 0;
+    var ffr = ev ? t.fail/ev : 0;
     var ok = ffr <= .15;
     var warn = !ok ? '<span style="background:var(--amber-bg);color:var(--amber);font-size:10px;padding:1px 6px;border-radius:4px;font-weight:700;margin-left:5px">⚠</span>' : '';
     return '<tr class="'+(ok?'':'warn-row')+'">'
