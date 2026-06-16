@@ -577,7 +577,7 @@ def build_daily_trends(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     trends: dict[str, dict[str, Any]] = {}
     for run in runs:
         report = run.get("report") or {}
-        date_key = str(run.get("created_at") or report.get("report_date") or "unknown")[:10]
+        date_key = str(run.get("created_at") or report.get("created_at") or "unknown")[:10]
         bucket = trends.setdefault(
             date_key,
             {

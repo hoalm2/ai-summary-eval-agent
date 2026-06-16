@@ -76,7 +76,7 @@ class SupabaseStore:
         try:
             reports = (
                 self.client.table("reports")
-                .select("id, ticker, report_date, source_pdf_url, report_text, status, created_at, eval_runs!left(id)")
+                .select("id, ticker, source_pdf_url, report_text, status, created_at, eval_runs!left(id)")
                 .is_("eval_runs.id", "null")
                 .or_("report_text.not.is.null,source_pdf_url.not.is.null")
                 .order("created_at")
@@ -94,7 +94,7 @@ class SupabaseStore:
         evaluated_report_ids = {item["report_id"] for item in eval_runs if item.get("report_id")}
         reports = (
             self.client.table("reports")
-            .select("id, ticker, report_date, source_pdf_url, report_text, status, created_at")
+            .select("id, ticker, source_pdf_url, report_text, status, created_at")
             .order("created_at")
             .limit(200)
             .execute()
@@ -113,7 +113,7 @@ class SupabaseStore:
             return []
         reports = (
             self.client.table("reports")
-            .select("id, ticker, report_date, source_pdf_url, report_text, status, created_at")
+            .select("id, ticker, source_pdf_url, report_text, status, created_at")
             .in_("id", report_ids)
             .execute()
             .data
@@ -135,12 +135,9 @@ class SupabaseStore:
         self.client.table("reports").update({"status": status}).eq("id", report_id).execute()
 
     def find_existing_report(self, *, ticker: str | None, report_date: str | None, source_pdf_url: str | None) -> dict[str, Any] | None:
-        query = self.client.table("reports").select("id, ticker, report_date, source_pdf_url, status")
+        query = self.client.table("reports").select("id, ticker, source_pdf_url, status")
         if source_pdf_url:
             response = query.eq("source_pdf_url", source_pdf_url).limit(1).execute()
-            return response.data[0] if response.data else None
-        if ticker and report_date:
-            response = query.eq("ticker", ticker).eq("report_date", report_date).limit(1).execute()
             return response.data[0] if response.data else None
         return None
 
@@ -212,7 +209,7 @@ class SupabaseStore:
         summary_ids = [run["summary_id"] for run in runs if run.get("summary_id")]
         reports = (
             self.client.table("reports")
-            .select("id, ticker, report_date")
+            .select("id, ticker")
             .in_("id", report_ids)
             .execute()
             .data

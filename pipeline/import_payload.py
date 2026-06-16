@@ -93,7 +93,6 @@ def build_report_payload(item: dict[str, Any]) -> dict[str, Any]:
         report_text = None
     return {
         "ticker": get_ticker(item),
-        "report_date": parse_report_date(item.get("report_date") or item.get("issue_date")),
         "source_pdf_url": get_source_pdf_url(item),
         "report_text": report_text,
         "status": item.get("status") or ("ready" if report_text else "pending"),
