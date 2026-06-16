@@ -537,17 +537,19 @@ def aggregate_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
     fail_count = verdict_counts.get("FAIL", 0)
     flag_count = verdict_counts.get("PASS-WITH-FLAG", 0)
     error_count = verdict_counts.get("ERROR", 0)
+    evaluated_count = pass_count + fail_count + flag_count  # exclude ERROR from rate base
     flagged_bullets = len(flagged_bullet_keys)
     return {
         "total_evaluated": total,
+        "evaluated_count": evaluated_count,
         "pass_count": pass_count,
         "fail_count": fail_count,
         "flag_count": flag_count,
         "error_count": error_count,
-        "pass_rate": pass_count / total if total else 0,
-        "fail_flag_rate": (fail_count + flag_count) / total if total else 0,
+        "pass_rate": pass_count / evaluated_count if evaluated_count else 0,
+        "fail_flag_rate": (fail_count + flag_count) / evaluated_count if evaluated_count else 0,
         "hallucination_count": hallucination_count,
-        "hallucination_rate": hallucination_count / total if total else 0,
+        "hallucination_rate": hallucination_count / evaluated_count if evaluated_count else 0,
         "buy_violation_count": buy_violation_count,
         "total_bullets": total_bullets,
         "flagged_bullets": flagged_bullets,
@@ -685,8 +687,10 @@ def render_dashboard(aggregate: dict[str, Any], runs: list[dict[str, Any]], *, d
         ensure_ascii=False,
     )
 
+    evaluated_count = aggregate.get("evaluated_count", 0)
     agg_js_obj = {
         "total": total,
+        "evaluated": evaluated_count,
         "pass": aggregate.get("pass_count", 0),
         "fail": fail_count,
         "flag": flag_count,
@@ -1153,9 +1157,9 @@ hr.d-rule { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
 
   <!-- ── TREND ──────────────────────────────────── -->
   <div class="panel" id="panel-trend">
-    <p class="panel-desc">Monitor trend của pass rate theo daily evaluation.</p>
+    <p class="panel-desc">Monitor trend của % summary Fail/Flag theo daily evaluation.</p>
     <div class="card" style="margin-bottom:16px">
-      <h3 class="card-title">Pass rate trend <span style="font-weight:400;font-size:12px;color:var(--sub)">(7 days · 85% threshold)</span></h3>
+      <h3 class="card-title">% Summary Fail/Flag trend <span style="font-weight:400;font-size:12px;color:var(--sub)">(7 days · 15% threshold)</span></h3>
       <div class="trend-svg-wrap" id="trendChart"></div>
     </div>
     <div class="card">
@@ -1181,8 +1185,8 @@ function ring(pct, color, sz, sw) {
 
 /* ═══════════════════ METRIC CARDS ═══════════════════ */
 var TIPS = {
-  failflag:'Đo theo đơn vị summary: mỗi summary được tính 1 lần. % summary có ít nhất 1 issue (FAIL hoặc FLAG). Mục tiêu ≤ 15% (tức pass rate ≥ 85%).',
-  hall:'% summary có ít nhất 1 hallucination issue (Type A hoặc Type B) trong batch. Đây là chỉ số chất lượng factual — mục tiêu ≤ 20%.',
+  failflag:'Đo theo đơn vị summary đã được eval thành công (loại trừ ERROR). % summary có ít nhất 1 issue (FAIL hoặc FLAG). Mục tiêu ≤ 15% (tức pass rate ≥ 85%).',
+  hall:'% summary có ít nhất 1 hallucination issue (Type A hoặc Type B) trong batch. Tính trên số summary eval thành công (loại trừ ERROR). Mục tiêu ≤ 20%.',
   buy:'Số issue vi phạm quy tắc buy price (đề xuất vùng giá mua, upside không kèm ngày tham chiếu…) trong batch. Đây là rủi ro an toàn sản phẩm — mục tiêu = 0 tuyệt đối.',
   bullet:'Đo theo đơn vị bullet point: % các câu (bullet) trong summary bị đánh dấu FAIL/FLAG, tính trên tổng số bullet của tất cả summary trong batch. Mục tiêu ≤ 10%.'
 };
@@ -1191,11 +1195,11 @@ function renderMetrics(agg) {
   var hallRate = agg.total ? agg.hallN / agg.total : 0;
   var cards = [
     { label:'% Summary Fail/Flag', val:Math.round(agg.failFlagRate*100)+'%',
-      desc:'% <em>summary</em> có ≥ 1 issue — đo theo từng summary, không phải bullet.',
+      desc:'% <em>summary</em> có ≥ 1 issue — '+( agg.fail+agg.flag)+'/'+agg.evaluated+' summaries eval thành công (loại trừ '+( agg.total-agg.evaluated)+' ERROR).',
       target:'≤ 15%', ok:agg.failFlagRate<=0.15,
       ringPct:agg.failFlagRate, tip:TIPS.failflag, fn:'onMC0' },
     { label:'Hallucination rate', val:Math.round(hallRate*100)+'%',
-      desc:'% <em>summary</em> có issue Type A hoặc Type B — '+agg.hallN+'/'+agg.total+' summaries trong batch.',
+      desc:'% <em>summary</em> có issue Type A hoặc Type B — '+agg.hallN+'/'+agg.evaluated+' summaries eval thành công.',
       target:'≤ 20%', ok:hallRate<=0.20,
       ringPct:hallRate, tip:TIPS.hall, fn:'onMC1' },
     { label:'Buy violations', val:''+agg.buyN,
@@ -1298,7 +1302,18 @@ function renderOverview(agg) {
 }
 
 /* ═══════════════════ RUN LIST ═══════════════════ */
-var filtered = RUNS.slice().sort(function(a,b){ return (b.created_at||'').localeCompare(a.created_at||''); });
+function hasLLMJudgeIssue(run) {
+  var issues = (run.blocks||[]).concat(run.flags||[]);
+  return issues.some(function(i){ return i.source === 'llm_judge'; }) ? 1 : 0;
+}
+function sortRuns(arr) {
+  return arr.sort(function(a,b){
+    var dateCmp = (b.created_at||'').slice(0,10).localeCompare((a.created_at||'').slice(0,10));
+    if (dateCmp !== 0) return dateCmp;
+    return hasLLMJudgeIssue(b) - hasLLMJudgeIssue(a);
+  });
+}
+var filtered = sortRuns(RUNS.slice());
 var selId = null;
 
 function matchCat(run, cat) {
@@ -1314,12 +1329,12 @@ function applyFilters() {
   var d = document.getElementById('fDate').value;
   var c = document.getElementById('fCategory').value;
 
-  filtered = RUNS.filter(function(r) {
+  filtered = sortRuns(RUNS.filter(function(r) {
     return (!v || r.verdict===v) &&
            (!s || r.ticker.includes(s)) &&
            (!d || (r.created_at||'').slice(0,10)===d) &&
            matchCat(r,c);
-  }).sort(function(a,b){ return (b.created_at||'').localeCompare(a.created_at||''); });
+  }));
 
   var parts = [];
   if (v) parts.push('Eval status: '+v);
@@ -1421,7 +1436,10 @@ function toggleWhy(btn) {
 
 function renderDetail(run) {
   var blocks = run.blocks||[], flags = run.flags||[];
-  var allIss = blocks.concat(flags);
+  var allIss = blocks.concat(flags).sort(function(a,b){
+    var aLLM = a.source==='llm_judge'?0:1, bLLM = b.source==='llm_judge'?0:1;
+    return aLLM - bLLM;
+  });
   var vc = run.verdict==='PASS'?'b-pass':run.verdict==='FAIL'?'b-fail':run.verdict==='PASS-WITH-FLAG'?'b-flag':'b-error';
   var vl = run.verdict==='PASS-WITH-FLAG'?'PASS-WITH-FLAG':run.verdict;
   var evalDt = run.created_at ? run.created_at.slice(0,10).replace(/^(\d{4})-(\d{2})-(\d{2})$/,'$3/$2/$1') : '—';
@@ -1463,46 +1481,50 @@ function toggleJson(btn) {
 function renderTrendChart() {
   var W=700, H=130, PL=44, PR=24, PT=16, PB=28;
   var cw=W-PL-PR, ch=H-PT-PB, n=TRENDS.length;
-  var rates = TRENDS.map(function(t){ return t.total?t.pass/t.total:0; });
+  var rates = TRENDS.map(function(t){
+    var ev = t.pass+t.fail+t.flag;
+    return ev ? (t.fail+t.flag)/ev : 0;
+  });
   function xi(i){ return n<=1 ? PL+cw/2 : PL + (i/(n-1))*cw; }
   function yr(r){ return PT + (1-r)*ch; }
-  var ty = yr(0.85);
+  var ty = yr(0.15);
   var pts = rates.map(function(r,i){ return xi(i).toFixed(1)+','+yr(r).toFixed(1); }).join(' ');
   var area = n<=1
     ? (xi(0).toFixed(1)+','+(PT+ch)+' '+xi(0).toFixed(1)+','+yr(rates[0]).toFixed(1)+' '+xi(0).toFixed(1)+','+(PT+ch))
     : (PL+','+(PT+ch)+' '+pts+' '+(PL+cw).toFixed(1)+','+(PT+ch));
   var dots = rates.map(function(r,i){
-    return '<circle cx="'+xi(i).toFixed(1)+'" cy="'+yr(r).toFixed(1)+'" r="5" fill="'+(r>=.85?'#12612f':'#c0392b')+'" stroke="white" stroke-width="2.5"/>';
+    return '<circle cx="'+xi(i).toFixed(1)+'" cy="'+yr(r).toFixed(1)+'" r="5" fill="'+(r<=.15?'#12612f':'#c0392b')+'" stroke="white" stroke-width="2.5"/>';
   }).join('');
   var dlabels = TRENDS.map(function(t,i){
     var d = t.date.replace(/^\d{4}-(\d{2})-(\d{2})$/,'$2/$1');
     return '<text x="'+xi(i).toFixed(1)+'" y="'+(H-4)+'" text-anchor="middle" font-size="11" fill="#8da8a5">'+d+'</text>';
   }).join('');
-  var ylabels = [0,.25,.5,.75,.85,1].map(function(v){
+  var ylabels = [0,.15,.25,.5,.75,1].map(function(v){
     return '<text x="'+(PL-6)+'" y="'+(yr(v).toFixed(1)*1+4)+'" text-anchor="end" font-size="10" fill="#8da8a5">'+Math.round(v*100)+'%</text>';
   }).join('');
 
   document.getElementById('trendChart').innerHTML =
     '<svg width="100%" viewBox="0 0 '+W+' '+H+'" style="max-width:'+W+'px;display:block;min-width:480px">'
-    +'<polygon points="'+area+'" fill="rgba(11,81,75,.05)"/>'
+    +'<polygon points="'+area+'" fill="rgba(192,57,43,.05)"/>'
     +'<line x1="'+PL+'" y1="'+ty.toFixed(1)+'" x2="'+(W-PR)+'" y2="'+ty.toFixed(1)+'" stroke="#e0a800" stroke-width="1.5" stroke-dasharray="6,3"/>'
-    +'<text x="'+(W-PR+4)+'" y="'+(ty+4).toFixed(1)+'" font-size="10" fill="#9a5000" font-weight="700">85%</text>'
-    +(n>1?'<polyline points="'+pts+'" fill="none" stroke="#0b514b" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>':'')
+    +'<text x="'+(W-PR+4)+'" y="'+(ty+4).toFixed(1)+'" font-size="10" fill="#9a5000" font-weight="700">15%</text>'
+    +(n>1?'<polyline points="'+pts+'" fill="none" stroke="#c0392b" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>':'')
     +dots+dlabels+ylabels
     +'</svg>';
 }
 
 function renderTrendTable() {
-  var thead = '<thead><tr><th>Date</th><th>Total</th><th>Pass rate</th><th>PASS</th><th>FAIL</th><th>FLAG</th></tr></thead>';
+  var thead = '<thead><tr><th>Date</th><th>Evaluated</th><th>% Fail/Flag</th><th>PASS</th><th>FAIL</th><th>FLAG</th><th>ERROR</th></tr></thead>';
   var rows = TRENDS.slice().reverse().map(function(t) {
-    var pr = t.total ? t.pass/t.total : 0;
-    var ok = pr >= .85;
+    var ev = t.pass+t.fail+t.flag;
+    var ffr = ev ? (t.fail+t.flag)/ev : 0;
+    var ok = ffr <= .15;
     var warn = !ok ? '<span style="background:var(--amber-bg);color:var(--amber);font-size:10px;padding:1px 6px;border-radius:4px;font-weight:700;margin-left:5px">⚠</span>' : '';
     return '<tr class="'+(ok?'':'warn-row')+'">'
       +'<td><strong>'+t.date+'</strong>'+warn+'</td>'
-      +'<td>'+t.total+'</td>'
-      +'<td style="font-weight:700;color:'+(ok?'#12612f':'#c0392b')+'">'+Math.round(pr*100)+'%</td>'
-      +'<td>'+t.pass+'</td><td>'+t.fail+'</td><td>'+t.flag+'</td>'
+      +'<td>'+ev+(t.error?' <span style="color:var(--dim);font-size:11px">(+'+t.error+' err)</span>':'')+'</td>'
+      +'<td style="font-weight:700;color:'+(ok?'#12612f':'#c0392b')+'">'+Math.round(ffr*100)+'%</td>'
+      +'<td>'+t.pass+'</td><td>'+t.fail+'</td><td>'+t.flag+'</td><td>'+(t.error||0)+'</td>'
       +'</tr>';
   }).join('');
   document.getElementById('trendTable').innerHTML = thead + '<tbody>'+rows+'</tbody>';

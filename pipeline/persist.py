@@ -197,7 +197,7 @@ class SupabaseStore:
         summary_ids = [run["summary_id"] for run in runs if run.get("summary_id")]
         reports = (
             self.client.table("reports")
-            .select("id, ticker, report_date, source_pdf_url, status")
+            .select("id, ticker, report_date")
             .in_("id", report_ids)
             .execute()
             .data
