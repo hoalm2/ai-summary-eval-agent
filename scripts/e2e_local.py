@@ -98,7 +98,7 @@ def main() -> None:
     if not mock_mode:
         print("  Stage 1  — skeleton extraction (Gemini, may take 30-90s)")
         print("  Stage 1b — citation alignment  (Gemini, may take 30-90s)")
-        print("  Stage 3b — LLM judge           (GPT-5 Mini)")
+        print("  Stage 3b — LLM judge           (Gemini)")
         print("  Stage 3a — deterministic factcheck\n")
 
     t0 = time.time()

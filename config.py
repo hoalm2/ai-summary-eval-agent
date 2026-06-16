@@ -67,7 +67,7 @@ def get_settings() -> Settings:
         model_skeleton=os.getenv("MODEL_SKELETON", "gemini/gemini-3.1-pro-preview"),
         model_align=os.getenv("MODEL_ALIGN", os.getenv("MODEL_SKELETON", "gemini/gemini-3.1-pro-preview")),
         model_summary=os.getenv("MODEL_SUMMARY", "openai/gpt-5-mini"),
-        model_judge=os.getenv("MODEL_JUDGE", "openai/gpt-5-mini"),
+        model_judge=os.getenv("MODEL_JUDGE", "gemini/gemini-3.1-pro-preview"),
         model_fallback=os.getenv("MODEL_FALLBACK", "deepseek/deepseek-v4-pro"),
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
         supabase_url=os.getenv("SUPABASE_URL", ""),

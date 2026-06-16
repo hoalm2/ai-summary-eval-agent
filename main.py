@@ -289,7 +289,10 @@ def status() -> dict[str, Any]:
 
 @app.get("/results")
 def results() -> list[dict[str, Any]]:
-    return SupabaseStore().fetch_eval_runs()
+    try:
+        return SupabaseStore().fetch_eval_runs()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.post("/run-one")
@@ -444,14 +447,17 @@ def import_reports(payload: ReportImportRequest, x_demo_token: str | None = Head
 
 @app.get("/dashboard")
 def dashboard(source: str = "real", date: str = "") -> Response:
-    store = SupabaseStore()
-    all_runs = store.fetch_eval_runs(limit=200)
-    runs = all_runs if source == "all" else [run for run in all_runs if (run.get("summary") or {}).get("summary_model") == "precreated"]
-    if date:
-        runs = [r for r in runs if str(r.get("created_at", "")).startswith(date)]
-    aggregate = aggregate_runs(runs)
-    html = render_dashboard(aggregate, runs, data_source=source, date_filter=date)
-    return Response(content=html, media_type="text/html", headers={"Cache-Control": "no-store"})
+    try:
+        store = SupabaseStore()
+        all_runs = store.fetch_eval_runs(limit=200)
+        runs = all_runs if source == "all" else [run for run in all_runs if (run.get("summary") or {}).get("summary_model") == "precreated"]
+        if date:
+            runs = [r for r in runs if str(r.get("created_at", "")).startswith(date)]
+        aggregate = aggregate_runs(runs)
+        html = render_dashboard(aggregate, runs, data_source=source, date_filter=date)
+        return Response(content=html, media_type="text/html", headers={"Cache-Control": "no-store"})
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 ISSUE_GROUP_LABELS = {
@@ -514,32 +520,35 @@ def aggregate_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
     for run in runs:
         verdict = str(run.get("verdict") or "ERROR")
         verdict_counts[verdict] = verdict_counts.get(verdict, 0) + 1
-        bullet_evals = run.get("bullet_evals") or []
-        if bullet_evals:
-            total_bullets += len(bullet_evals)
-        else:
-            summary_text = str((run.get("summary") or {}).get("summary_text") or "")
-            total_bullets += len(_parse_bullets_from_text(summary_text))
+        if verdict != "ERROR":
+            bullet_evals = run.get("bullet_evals") or []
+            if bullet_evals:
+                total_bullets += len(bullet_evals)
+            else:
+                summary_text = str((run.get("summary") or {}).get("summary_text") or "")
+                total_bullets += len(_parse_bullets_from_text(summary_text))
         all_issues = (run.get("blocks") or []) + (run.get("flags") or [])
-        for issue in all_issues:
-            category = issue.get("category", "unknown")
-            failure_breakdown[category] = failure_breakdown.get(category, 0) + 1
-            if str(category).startswith("buy_price"):
-                buy_violation_count += 1
-            bi = issue.get("bullet_index")
-            if bi is not None:
-                flagged_bullet_keys.add(f"{id(run)}:{bi}")
-        if any(
-            str(i.get("category", "")).startswith(("A_", "B_"))
-            and str(i.get("category", "")) != "B_tone_escalation"
-            for i in all_issues
-        ):
-            hallucination_count += 1
-        if any(str(i.get("category", "")) in ("format", "render") for i in all_issues):
-            format_violation_count += 1
+        if verdict != "ERROR":
+            for issue in all_issues:
+                category = issue.get("category", "unknown")
+                failure_breakdown[category] = failure_breakdown.get(category, 0) + 1
+                if str(category).startswith("buy_price"):
+                    buy_violation_count += 1
+                bi = issue.get("bullet_index")
+                if bi is not None:
+                    flagged_bullet_keys.add(f"{id(run)}:{bi}")
+        if verdict != "ERROR":
+            if any(
+                str(i.get("category", "")).startswith(("A_", "B_"))
+                and str(i.get("category", "")) != "B_tone_escalation"
+                for i in all_issues
+            ):
+                hallucination_count += 1
+            if any(str(i.get("category", "")) in ("format", "render") for i in all_issues):
+                format_violation_count += 1
     pass_count = verdict_counts.get("PASS", 0)
     fail_count = verdict_counts.get("FAIL", 0)
-    flag_count = verdict_counts.get("PASS-WITH-FLAG", 0)
+    flag_count = verdict_counts.get("FLAG", 0)
     error_count = verdict_counts.get("ERROR", 0)
     evaluated_count = pass_count + fail_count + flag_count  # exclude ERROR from rate base
     flagged_bullets = len(flagged_bullet_keys)
@@ -588,7 +597,7 @@ def build_daily_trends(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
             bucket["pass"] += 1
         elif verdict == "FAIL":
             bucket["fail"] += 1
-        elif verdict == "PASS-WITH-FLAG":
+        elif verdict == "FLAG":
             bucket["flag"] += 1
         elif verdict == "ERROR":
             bucket["error"] += 1
@@ -623,7 +632,7 @@ def run_to_js_dict(run: dict[str, Any]) -> dict[str, Any]:
     flags = run.get("flags") or []
     bullet_evals = run.get("bullet_evals") or []
 
-    bullets: list[str] = [str(be.get("bullet_text", "")) for be in bullet_evals if be.get("bullet_text")]
+    bullets: list[str] = [str(be.get("bullet_text", "")).lstrip("-•·*▸►◆●○■").strip() for be in bullet_evals if be.get("bullet_text")]
     if not bullets:
         bullets = _parse_bullets_from_text(str(summary.get("summary_text", "")))
 
@@ -784,11 +793,12 @@ code { font-family: "SF Mono", Consolas, "Courier New", monospace; }
   justify-content: space-between; width: 100%; margin-bottom: 5px; line-height: 1.4;
 }
 .mc-value { font-size: 30px; font-weight: 800; line-height: 1; margin-bottom: 7px; }
-.mc-desc { font-size: 11px; color: var(--sub); line-height: 1.45; margin: 0 0 8px; }
+.mc-desc { font-size: 11px; color: var(--sub); line-height: 1.45; margin: 0; flex: 1; }
 .mc-desc em { font-style: normal; font-weight: 700; color: var(--text); }
 .mc-pill {
   display: inline-flex; align-items: center; gap: 4px;
   font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px;
+  margin-top: 10px; align-self: flex-start;
 }
 /* ─── TOOLTIP ─────────────────────────────────────────── */
 .tip { position: relative; display: inline-flex; }
@@ -1121,7 +1131,7 @@ hr.d-rule { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
           <option value="">All</option>
           <option value="PASS">PASS</option>
           <option value="FAIL">FAIL</option>
-          <option value="PASS-WITH-FLAG">FLAG</option>
+          <option value="FLAG">FLAG</option>
         </select>
       </div>
       <div class="fg">
@@ -1193,7 +1203,7 @@ function ring(pct, color, sz, sw) {
 
 /* ═══════════════════ METRIC CARDS ═══════════════════ */
 var TIPS = {
-  failflag:'Đo theo đơn vị summary đã được eval thành công (loại trừ ERROR). % summary bị FAIL (verdict = FAIL). FLAG không tính vào tử số. Mục tiêu ≤ 15%.',
+  failflag:'% summary có verdict = FAIL trên tổng số summary được eval (PASS + FAIL + FLAG, loại trừ ERROR). FLAG không tính vào tử số. Mục tiêu ≤ 2%.',
   hall:'% summary có ít nhất 1 hallucination issue (Type A hoặc Type B) trong batch. Tính trên số summary eval thành công (loại trừ ERROR). Mục tiêu ≤ 2%.',
   buy:'Số issue vi phạm quy tắc buy price (đề xuất vùng giá mua, upside không kèm ngày tham chiếu…) trong batch. Đây là rủi ro an toàn sản phẩm — mục tiêu = 0 tuyệt đối.',
   bullet:'Đo theo đơn vị bullet point: % các câu (bullet) trong summary bị đánh dấu FAIL/FLAG, tính trên tổng số bullet của tất cả summary trong batch. Mục tiêu ≤ 10%.',
@@ -1201,13 +1211,14 @@ var TIPS = {
 };
 
 function renderMetrics(agg) {
+  var failRate = agg.evaluated ? agg.fail / agg.evaluated : 0;
   var hallRate = agg.evaluated ? agg.hallN / agg.evaluated : 0;
   var fmtViolRate = agg.evaluated ? agg.fmtN / agg.evaluated : 0;
   var cards = [
-    { label:'% Summary Fail', val:Math.round(agg.failFlagRate*100)+'%',
-      desc:'<em>FAIL</em> / evaluated: '+agg.fail+'/'+agg.evaluated+' summaries (loại trừ FLAG và '+( agg.total-agg.evaluated)+' ERROR).',
-      target:'≤ 15%', ok:agg.failFlagRate<=0.15,
-      ringPct:agg.failFlagRate, tip:TIPS.failflag, fn:'onMC0' },
+    { label:'% Summary Fail', val:Math.round(failRate*100)+'%',
+      desc:'Số summary bị đánh <em>FAIL</em> — '+agg.fail+'/'+agg.evaluated+' trên số summary được eval.',
+      target:'≤ 2%', ok:failRate<=0.02,
+      ringPct:failRate, tip:TIPS.failflag, fn:'onMC0' },
     { label:'Hallucination rate', val:Math.round(hallRate*100)+'%',
       desc:'% <em>summary</em> có issue Type A hoặc Type B — '+agg.hallN+'/'+agg.evaluated+' summaries eval thành công.',
       target:'≤ 2%', ok:hallRate<=0.02,
@@ -1221,7 +1232,7 @@ function renderMetrics(agg) {
       target:'≥ 95%', ok:(1-fmtViolRate)>=0.95,
       ringPct:fmtViolRate, tip:TIPS.fmt, fn:'onMC3' },
     { label:'% Fail/Flag bullet / summary', val:Math.round(agg.bulletFailRate*100)+'%',
-      desc:'% <em>bullet point</em> bị đánh dấu — '+agg.flaggedBullets+'/'+agg.totalBullets+' bullet trên toàn batch.',
+      desc:'% <em>bullet point</em> bị đánh FAIL/FLAG — '+agg.flaggedBullets+'/'+agg.totalBullets+' bullet trên số bullet point được eval.',
       target:'≤ 10%', ok:agg.bulletFailRate<=0.10,
       ringPct:Math.min(agg.bulletFailRate,1), tip:TIPS.bullet, fn:'onMC4' }
   ];
@@ -1385,8 +1396,8 @@ function renderList() {
     return;
   }
   body.innerHTML = filtered.map(function(r) {
-    var vc = r.verdict==='PASS'?'b-pass':r.verdict==='FAIL'?'b-fail':r.verdict==='PASS-WITH-FLAG'?'b-flag':'b-error';
-    var vl = r.verdict==='PASS-WITH-FLAG'?'FLAG':r.verdict;
+    var vc = r.verdict==='PASS'?'b-pass':r.verdict==='FAIL'?'b-fail':r.verdict==='FLAG'?'b-flag':'b-error';
+    var vl = r.verdict==='FLAG'?'FLAG':r.verdict;
     var dt = r.created_at ? r.created_at.slice(0,10).replace(/^(\d{4})-(\d{2})-(\d{2})$/,'$3/$2') : '—';
     return '<div class="rl-row '+(selId===r.id?'sel':'')+'" onclick="selectRun(\\''+r.id+'\\')">'
       +'<span class="badge '+vc+'">'+vl+'</span>'
@@ -1455,15 +1466,14 @@ function renderDetail(run) {
     var aLLM = a.source==='llm_judge'?0:1, bLLM = b.source==='llm_judge'?0:1;
     return aLLM - bLLM;
   });
-  var vc = run.verdict==='PASS'?'b-pass':run.verdict==='FAIL'?'b-fail':run.verdict==='PASS-WITH-FLAG'?'b-flag':'b-error';
-  var vl = run.verdict==='PASS-WITH-FLAG'?'PASS-WITH-FLAG':run.verdict;
+  var vc = run.verdict==='PASS'?'b-pass':run.verdict==='FAIL'?'b-fail':run.verdict==='FLAG'?'b-flag':'b-error';
+  var vl = run.verdict==='FLAG'?'FLAG':run.verdict;
   var evalDt = run.created_at ? run.created_at.slice(0,10).replace(/^(\d{4})-(\d{2})-(\d{2})$/,'$3/$2/$1') : '—';
   var rawJson = esc(JSON.stringify(allIss, null, 2));
 
   document.getElementById('detailPane').innerHTML =
     '<div class="d-hdr">'
-    +'<div><div class="d-sym">'+run.ticker+'</div><div class="d-date">Eval date: '+evalDt+'</div></div>'
-    +'<div style="display:flex;gap:8px;align-items:center;padding-top:4px"><span class="badge '+vc+'">'+vl+'</span></div>'
+    +'<div style="flex:1"><div style="display:flex;align-items:center;gap:8px"><div class="d-sym">'+run.ticker+'</div><span class="badge '+vc+'">'+vl+'</span></div><div class="d-date">Eval date: '+evalDt+'</div></div>'
     +'<div class="d-time">'+(run.created_at||'').replace('T',' ')+'</div>'
     +'</div>'
     +'<div class="d-iss-row">'

@@ -212,8 +212,8 @@ FactcheckResult(
 ### 3b — LLM Judge
 
 **Prompt:** `prompts/eval_judge.md`  
-**Model:** `settings.model_judge` (default: `openai/gpt-5-mini`)  
-**LLM call type:** `json_chat` via **Responses API** (non-streaming, `reasoning: medium`) — routed through `_responses_once()` when model starts with `openai/gpt-5-mini`  
+**Model:** `settings.model_judge` (default: `gemini/gemini-3.1-pro-preview`)  
+**LLM call type:** `json_chat` via Chat Completions (JSON mode when `GREENNODE_JSON_MODE=true`)  
 **Max tokens:** `settings.judge_max_tokens`
 
 #### Input (user prompt structure)
@@ -226,7 +226,7 @@ FactcheckResult(
 {summary_text}
 </SUMMARY>
 <FORMAT_SPEC>
-Summary phải là tiếng Việt, tối đa 5 bullet points, mỗi bullet 1–2 câu, không nêu giá mua.
+Summary phải là tiếng Việt, tối đa 4 bullet points, mỗi bullet 1–2 câu, không nêu giá mua, giá vào lệnh, hay khuyến nghị thời điểm mua.
 </FORMAT_SPEC>
 <SKELETON>
 {skeleton_json as JSON}
@@ -343,10 +343,10 @@ Controlled by `MOCK_LLM_MODE` env var (default `true`).
 |---|---|---|
 | Stage 1 LLM call | Returns fixed skeleton JSON, 0 tokens | Calls GreenNode `gemini/gemini-3.1-pro-preview` |
 | Stage 1b LLM call | Returns single placeholder bullet, 0 tokens | Calls GreenNode `gemini/gemini-3.1-pro-preview` |
-| Stage 3b LLM judge | Keyword-matches summary for `buy_price_timing`, `B_tone_escalation`, `A_logic_temporal`, `C_disclaimer_omission` | Calls GreenNode `openai/gpt-5-mini` via Responses API |
+| Stage 3b LLM judge | Keyword-matches summary for `buy_price_timing`, `B_tone_escalation`, `A_logic_temporal`, `C_disclaimer_omission` | Calls GreenNode `gemini/gemini-3.1-pro-preview` via Chat Completions |
 | Deterministic factcheck | Runs normally (no LLM) | Runs normally |
 | Supabase reads/writes | Real | Real |
-| `summary_model` value saved | `"mock_llm"` | Model name (e.g. `"openai/gpt-5-mini"`) |
+| `summary_model` value saved | `"mock_llm"` | Model name (e.g. `"gemini/gemini-3.1-pro-preview"`) |
 
 The mock judge uses the following keyword triggers for test coverage:
 

@@ -129,7 +129,7 @@ Is any important risk, limitation, or uncertainty from the report missing from t
 ### Format Inconsistency (`format`)
 
 - Summary is not in bullet-point format per the prompt spec
-- Number of bullets or bullet length is outside the specified range (max 5 bullets, 1–2 sentences each)
+- Number of bullets or bullet length is outside the specified range (max 4 bullets, 1–2 sentences each)
 - Language is not Vietnamese
 - Any element violates the no-buy-price format rule
 
@@ -159,7 +159,7 @@ A claim is flagged only when the report explicitly contradicts it, omits it, or 
 
 ## Check Methods by Failure Mode
 
-Each failure mode is caught by one of two mechanisms — **Deterministic** (rule-based code, no LLM) or **LLM Judge** (Claude Sonnet). The two layers run independently and their findings are merged before the final verdict.
+Each failure mode is caught by one of two mechanisms — **Deterministic** (rule-based code, no LLM) or **LLM Judge** (Gemini 3.1 Pro Preview). The two layers run independently and their findings are merged before the final verdict.
 
 | Category | Severity | Check Method | Rationale |
 |---|---|---|---|

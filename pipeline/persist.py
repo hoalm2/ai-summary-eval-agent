@@ -181,16 +181,31 @@ class SupabaseStore:
         response = self.client.table("eval_runs").insert(payload).execute()
         return response.data[0]
 
+    def _query_eval_runs(self, limit: int) -> list[dict[str, Any]]:
+        try:
+            return (
+                self.client.table("eval_runs")
+                .select("id, report_id, summary_id, skeleton_json, judge_json, verdict, blocks, flags, bullet_evals, created_at")
+                .order("created_at", desc=True)
+                .limit(limit)
+                .execute()
+                .data
+                or []
+            )
+        except Exception:
+            # bullet_evals column may not exist in older schema — retry without it
+            return (
+                self.client.table("eval_runs")
+                .select("id, report_id, summary_id, skeleton_json, judge_json, verdict, blocks, flags, created_at")
+                .order("created_at", desc=True)
+                .limit(limit)
+                .execute()
+                .data
+                or []
+            )
+
     def fetch_eval_runs(self, *, limit: int = 100) -> list[dict[str, Any]]:
-        runs = (
-            self.client.table("eval_runs")
-            .select("id, report_id, summary_id, skeleton_json, judge_json, verdict, blocks, flags, bullet_evals, created_at")
-            .order("created_at", desc=True)
-            .limit(limit)
-            .execute()
-            .data
-            or []
-        )
+        runs = self._query_eval_runs(limit)
         if not runs:
             return []
         report_ids = [run["report_id"] for run in runs if run.get("report_id")]

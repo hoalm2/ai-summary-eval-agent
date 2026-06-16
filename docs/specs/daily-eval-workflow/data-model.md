@@ -92,6 +92,7 @@ Stores one evaluation result per pipeline run attempt. A report that fails PDF e
 | `verdict` | text | No | `PASS` \| `FLAG` \| `FAIL` \| `ERROR` |
 | `blocks` | jsonb | No | Array of BLOCK issue objects; `[]` on PASS or ERROR |
 | `flags` | jsonb | No | Array of FLAG issue objects; `[]` on PASS or ERROR |
+| `bullet_evals` | jsonb | Yes | Per-bullet citation alignment from Stage 1b; `[]` if Stage 1b was skipped or errored |
 | `created_at` | timestamptz | No | Auto-set |
 
 ### `skeleton_json` schema
@@ -195,7 +196,9 @@ POST /reports/import
        │
        ├─ Stage 1: extract_skeleton(report_text) → skeleton_json
        │
-       ├─ Stage 3: judge_summary(report_text, summary_text, skeleton_json)
+       ├─ Stage 1b: align_bullets(report_text, summary_text) → bullet_evals
+       │
+       ├─ Stage 3: judge_summary(report_text, summary_text, skeleton_json, bullet_evals)
        │    ├─ deterministic_factcheck() → blocks, flags (code only)
        │    ├─ LLM judge → judge_json
        │    └─ merge_issues() + compute_verdict() → verdict
