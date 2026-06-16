@@ -244,6 +244,12 @@ def generate_and_evaluate_report_safely(report: dict[str, Any], store: SupabaseS
             }
 
 
+@app.get("/")
+def root():
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/dashboard")
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
