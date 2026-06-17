@@ -1,6 +1,6 @@
 # AI Summary Judge
 
-Automated quality-control pipeline for Vietnamese stock-research AI summaries — catches hallucinations, factual errors, and buy-price violations before they reach end users.
+AI Summary Judge is an automated quality-control pipeline that evaluates the quality of AI-generated stock research summaries. The team's goal is to automatically control the quality of AI-generated content and ensure accuracy.
 
 ---
 
@@ -19,11 +19,16 @@ Automated quality-control pipeline for Vietnamese stock-research AI summaries �
 
 ### The Manual Workflow Didn't Scale
 
-Before this project, quality review was fully manual: one PM/PO using NotebookLM + Claude chat + Excel, taking **15–20 minutes per summary**. It did not scale, produced no regression history, and had no automated guardrails.
+Before this project, quality review was fully manual: one PM/PO using NotebookLM + Claude chat + Excel, taking **15–20 minutes per summary** to identify issues such as incorrect figures, missing context, or misleading conclusions. This process was time-consuming and difficult to scale once the product was released to a large user base.
+
+### The values
+The pipeline acts as a “VAR system for AI.” Everyday, AI Summary Judge automatically compares it against the original analyst report to verify factual accuracy, consistency, and completeness. It can detect hallucinations, missing critical information, and violations of product rules. The system then returns a clear verdict — PASS, FLAG, or FAIL — together with detailed explanations of detected issues and suggested actions.
+
+As a result, teams no longer need to manually review every summary. Instead, they can monitor daily AI-generated reports and focus only on flagged cases. The solution significantly reduces review effort, improves content quality, and minimizes the risk of inaccurate information reaching users.
 
 ### Who This Is For
 
-**Primary user: PM/PO** responsible for daily AI summary quality review. The pipeline replaces the manual workflow — open the dashboard, see the verdict, intervene only when needed.
+**Primary user: PM/PO** or who responsible for daily AI summary quality review. The pipeline replaces the manual workflow — open the dashboard, see the verdict, intervene only when needed.
 
 ---
 
