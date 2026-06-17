@@ -76,7 +76,7 @@ Supabase `reports` + `summaries`
 | `PASS` | No issues — summary is faithful and within product rules |
 | `FLAG` | One minor issue — usable but flagged for review |
 | `FAIL` | At least one BLOCK issue, or ≥ 2 FLAGs — must not be published |
-| `ERROR` | Pipeline could not evaluate — report text unreadable or judge output unparseable |
+| `ERROR` | Pipeline failed to evaluate by llm, deterministic only|
 
 Full rubric → [docs/specs/daily-eval-workflow/eval-taxonomy.md](docs/specs/daily-eval-workflow/eval-taxonomy.md)
 
